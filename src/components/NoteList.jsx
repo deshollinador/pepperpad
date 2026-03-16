@@ -1,14 +1,32 @@
 import { useState } from 'react'
 
-function NoteList({ notes, onSelectNote, onCreateNote }) {
+function NoteList({ notes, onSelectNote, onCreateNote, onDeleteNote, onDuplicateNote }) {
   const [search, setSearch] = useState('')
+  const [contextMenu, setContextMenu] = useState(null)
 
   const filtered = notes.filter(note =>
     note.title.toLowerCase().includes(search.toLowerCase())
   )
 
+  const handleLongPress = (note, e) => {
+    e.preventDefault()
+    setContextMenu(note.id)
+  }
+
+  const handleDelete = (note) => {
+    if (window.confirm('¿Eliminar esta nota?')) {
+      onDeleteNote(note.id)
+    }
+    setContextMenu(null)
+  }
+
+  const handleDuplicate = (note) => {
+    onDuplicateNote(note)
+    setContextMenu(null)
+  }
+
   return (
-    <div>
+    <div onClick={() => setContextMenu(null)}>
       <div style={{ marginBottom: '24px' }}>
         <input
           type="text"
@@ -30,14 +48,46 @@ function NoteList({ notes, onSelectNote, onCreateNote }) {
         {filtered.map(note => (
           <div
             key={note.id}
-            onClick={() => onSelectNote(note)}
+            onClick={() => contextMenu ? setContextMenu(null) : onSelectNote(note)}
+            onContextMenu={e => handleLongPress(note, e)}
             style={{
               padding: '12px 0',
               borderBottom: '1px solid var(--color-border)',
-              cursor: 'pointer'
+              cursor: 'pointer',
+              position: 'relative'
             }}
           >
             <span>{note.title}</span>
+
+            {contextMenu === note.id && (
+              <div
+                onClick={e => e.stopPropagation()}
+                style={{
+                  position: 'absolute',
+                  right: '0',
+                  top: '0',
+                  background: 'white',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius)',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                  zIndex: 10,
+                  minWidth: '160px'
+                }}
+              >
+                <div
+                  onClick={() => handleDuplicate(note)}
+                  style={{ padding: '12px 16px', cursor: 'pointer', fontSize: '14px' }}
+                >
+                  Duplicar
+                </div>
+                <div
+                  onClick={() => handleDelete(note)}
+                  style={{ padding: '12px 16px', cursor: 'pointer', fontSize: '14px', color: 'red' }}
+                >
+                  Eliminar
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>

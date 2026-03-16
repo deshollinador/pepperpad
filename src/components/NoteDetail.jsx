@@ -49,9 +49,10 @@ function Block({ block, onChange }) {
   )
 }
 
-function NoteDetail({ note, onBack, onUpdate }) {
+function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   const [title, setTitle] = useState(note.title)
   const [blocks, setBlocks] = useState(note.blocks)
+  const [menuOpen, setMenuOpen] = useState(false)
 
   const handleTitleChange = (e) => {
     const newTitle = e.target.value
@@ -80,15 +81,57 @@ function NoteDetail({ note, onBack, onUpdate }) {
     onUpdate({ ...note, title, blocks: newBlocks })
   }
 
+  const handleDelete = () => {
+    if (window.confirm('¿Eliminar esta nota?')) {
+      onDelete(note.id)
+    }
+  }
+
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
         <button
           onClick={onBack}
-          style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', padding: '0', marginRight: '16px' }}
+          style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', padding: '0' }}
         >
           ←
         </button>
+
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => setMenuOpen(!menuOpen)}
+            style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', padding: '0 4px' }}
+          >
+            ···
+          </button>
+
+          {menuOpen && (
+            <div style={{
+              position: 'absolute',
+              right: '0',
+              top: '28px',
+              background: 'white',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              zIndex: 10,
+              minWidth: '160px'
+            }}>
+              <div
+                onClick={() => { setMenuOpen(false) }}
+                style={{ padding: '12px 16px', cursor: 'pointer', fontSize: '14px' }}
+              >
+                Exportar
+              </div>
+              <div
+                onClick={handleDelete}
+                style={{ padding: '12px 16px', cursor: 'pointer', fontSize: '14px', color: 'red' }}
+              >
+                Eliminar nota
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <div style={{ marginBottom: '24px' }}>

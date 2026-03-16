@@ -32,6 +32,22 @@ function App() {
     setSelectedNote(updatedNote)
   }
 
+  const deleteNote = (noteId) => {
+    setNotes(notes.filter(n => n.id !== noteId))
+    setSelectedNote(null)
+  }
+
+  const duplicateNote = (note) => {
+    const duplicated = {
+      ...note,
+      id: Date.now().toString(),
+      title: note.title + ' (copia)',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+    setNotes([duplicated, ...notes])
+  }
+
   return (
     <div>
       {selectedNote ? (
@@ -39,12 +55,15 @@ function App() {
           note={selectedNote}
           onBack={() => setSelectedNote(null)}
           onUpdate={updateNote}
+          onDelete={deleteNote}
         />
       ) : (
         <NoteList
           notes={notes}
           onSelectNote={setSelectedNote}
           onCreateNote={createNote}
+          onDeleteNote={deleteNote}
+          onDuplicateNote={duplicateNote}
         />
       )}
     </div>
