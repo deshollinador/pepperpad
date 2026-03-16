@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-function Block({ block, onChange, onDelete, onDuplicate }) {
+function Block({ block, onChange, onDelete, onDuplicate, onAddChild, depth = 0 }) {
   const [collapsed, setCollapsed] = useState(true)
   const [contextMenu, setContextMenu] = useState(false)
 
@@ -11,7 +11,12 @@ function Block({ block, onChange, onDelete, onDuplicate }) {
 
   return (
     <div
-      style={{ borderBottom: '1px solid var(--color-border)', padding: '12px 0', position: 'relative' }}
+      style={{
+        borderBottom: depth === 0 ? '1px solid var(--color-border)' : 'none',
+        padding: '12px 0',
+        paddingLeft: depth * 20,
+        position: 'relative'
+      }}
       onClick={() => setContextMenu(false)}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -20,13 +25,14 @@ function Block({ block, onChange, onDelete, onDuplicate }) {
           value={block.title}
           onChange={e => onChange({ ...block, title: e.target.value })}
           onContextMenu={handleLongPress}
-          placeholder="Título del bloque"
+          placeholder="Título"
           style={{
             border: 'none',
-            fontSize: '16px',
+            fontSize: depth === 0 ? '16px' : '14px',
             outline: 'none',
             fontFamily: 'var(--font-main)',
-            width: '100%'
+            width: '100%',
+            color: depth === 0 ? 'var(--color-text)' : 'var(--color-text-light)'
           }}
         />
         <span
@@ -38,22 +44,75 @@ function Block({ block, onChange, onDelete, onDuplicate }) {
       </div>
 
       {!collapsed && (
-        <textarea
-          value={block.body}
-          onChange={e => onChange({ ...block, body: e.target.value })}
-          placeholder="Escribe algo..."
-          style={{
-            marginTop: '8px',
-            width: '100%',
-            minHeight: '80px',
-            border: 'none',
-            outline: 'none',
-            fontFamily: 'var(--font-main)',
-            fontSize: '14px',
-            color: 'var(--color-text-light)',
-            resize: 'none'
-          }}
-        />
+        <div>
+          <textarea
+            value={block.body}
+            onChange={e => onChange({ ...block, body: e.target.value })}
+            placeholder="Escribe algo..."
+            style={{
+              marginTop: '8px',
+              width: '100%',
+              minHeight: '80px',
+              border: 'none',
+              outline: 'none',
+              fontFamily: 'var(--font-main)',
+              fontSize: '14px',
+              color: 'var(--color-text-light)',
+              resize: 'none'
+            }}
+          />
+
+          {depth === 0 && (
+            <div>
+              {block.children && block.children.map(child => (
+                <Block
+                  key={child.id}
+                  block={child}
+                  depth={1}
+                  onChange={(updatedChild) => {
+                    const newChildren = block.children.map(c =>
+                      c.id === updatedChild.id ? updatedChild : c
+                    )
+                    onChange({ ...block, children: newChildren })
+                  }}
+                  onDelete={(childId) => {
+                    const newChildren = block.children.filter(c => c.id !== childId)
+                    onChange({ ...block, children: newChildren })
+                  }}
+                  onDuplicate={(child) => {
+                    const duplicated = { ...child, id: Date.now().toString() }
+                    const index = block.children.findIndex(c => c.id === child.id)
+                    const newChildren = [
+                      ...block.children.slice(0, index + 1),
+                      duplicated,
+                      ...block.children.slice(index + 1)
+                    ]
+                    onChange({ ...block, children: newChildren })
+                  }}
+                  onAddChild={() => {}}
+                />
+              ))}
+
+              <button
+                onClick={() => onAddChild(block.id)}
+                style={{
+                  marginTop: '8px',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--color-text-light)',
+                  fontSize: '13px',
+                  padding: '4px 0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                + Añadir
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
       {contextMenu && (
@@ -78,18 +137,18 @@ function Block({ block, onChange, onDelete, onDuplicate }) {
             }}
             style={{ padding: '12px 16px', cursor: 'pointer', fontSize: '14px' }}
           >
-            Duplicar bloque
+            Duplicar
           </div>
           <div
             onClick={() => {
-              if (window.confirm('¿Eliminar este bloque?')) {
+              if (window.confirm('¿Eliminar?')) {
                 onDelete(block.id)
               }
               setContextMenu(false)
             }}
             style={{ padding: '12px 16px', cursor: 'pointer', fontSize: '14px', color: 'red' }}
           >
-            Eliminar bloque
+            Eliminar
           </div>
         </div>
       )}
@@ -140,6 +199,26 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
       duplicated,
       ...blocks.slice(index + 1)
     ]
+    setBlocks(newBlocks)
+    onUpdate({ ...note, title, body: noteBody, blocks: newBlocks })
+  }
+
+  const handleAddChild = (parentId) => {
+    const newChild = {
+      id: Date.now().toString(),
+      title: '',
+      body: '',
+      attributes: [],
+      children: [],
+      collapsed: true,
+      order: 0
+    }
+    const newBlocks = blocks.map(b => {
+      if (b.id === parentId) {
+        return { ...b, children: [...(b.children || []), newChild] }
+      }
+      return b
+    })
     setBlocks(newBlocks)
     onUpdate({ ...note, title, body: noteBody, blocks: newBlocks })
   }
@@ -264,6 +343,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
             onChange={handleBlockChange}
             onDelete={handleBlockDelete}
             onDuplicate={handleBlockDuplicate}
+            onAddChild={handleAddChild}
           />
         ))}
 
@@ -281,7 +361,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
             fontSize: '14px'
           }}
         >
-          + Añadir bloque
+          + Añadir
         </button>
       </div>
     </div>
