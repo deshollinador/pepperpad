@@ -1,8 +1,11 @@
 import { useState } from 'react'
-import { initialNotes } from '../data/initialData'
 
-function NoteList({ onSelectNote }) {
-  const [notes] = useState(initialNotes)
+function NoteList({ notes, onSelectNote, onCreateNote }) {
+  const [search, setSearch] = useState('')
+
+  const filtered = notes.filter(note =>
+    note.title.toLowerCase().includes(search.toLowerCase())
+  )
 
   return (
     <div>
@@ -10,6 +13,8 @@ function NoteList({ onSelectNote }) {
         <input
           type="text"
           placeholder="Buscar..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
           style={{
             width: '100%',
             padding: '10px 14px',
@@ -22,7 +27,7 @@ function NoteList({ onSelectNote }) {
       </div>
 
       <div>
-        {notes.map(note => (
+        {filtered.map(note => (
           <div
             key={note.id}
             onClick={() => onSelectNote(note)}
@@ -38,6 +43,7 @@ function NoteList({ onSelectNote }) {
       </div>
 
       <button
+        onClick={onCreateNote}
         style={{
           position: 'fixed',
           bottom: '24px',

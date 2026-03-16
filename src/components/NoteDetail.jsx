@@ -1,17 +1,15 @@
 import { useState } from 'react'
 
-function Block({ block }) {
+function Block({ block, onChange }) {
   const [collapsed, setCollapsed] = useState(true)
-  const [title, setTitle] = useState(block.title)
-  const [body, setBody] = useState(block.body)
 
   return (
     <div style={{ borderBottom: '1px solid var(--color-border)', padding: '12px 0' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <input
           type="text"
-          value={title}
-          onChange={e => setTitle(e.target.value)}
+          value={block.title}
+          onChange={e => onChange({ ...block, title: e.target.value })}
           placeholder="Título del bloque"
           style={{
             border: 'none',
@@ -31,8 +29,8 @@ function Block({ block }) {
 
       {!collapsed && (
         <textarea
-          value={body}
-          onChange={e => setBody(e.target.value)}
+          value={block.body}
+          onChange={e => onChange({ ...block, body: e.target.value })}
           placeholder="Escribe algo..."
           style={{
             marginTop: '8px',
@@ -51,9 +49,21 @@ function Block({ block }) {
   )
 }
 
-function NoteDetail({ note, onBack }) {
+function NoteDetail({ note, onBack, onUpdate }) {
   const [title, setTitle] = useState(note.title)
   const [blocks, setBlocks] = useState(note.blocks)
+
+  const handleTitleChange = (e) => {
+    const newTitle = e.target.value
+    setTitle(newTitle)
+    onUpdate({ ...note, title: newTitle, blocks })
+  }
+
+  const handleBlockChange = (updatedBlock) => {
+    const newBlocks = blocks.map(b => b.id === updatedBlock.id ? updatedBlock : b)
+    setBlocks(newBlocks)
+    onUpdate({ ...note, title, blocks: newBlocks })
+  }
 
   const addBlock = () => {
     const newBlock = {
@@ -65,7 +75,9 @@ function NoteDetail({ note, onBack }) {
       collapsed: true,
       order: blocks.length
     }
-    setBlocks([...blocks, newBlock])
+    const newBlocks = [...blocks, newBlock]
+    setBlocks(newBlocks)
+    onUpdate({ ...note, title, blocks: newBlocks })
   }
 
   return (
@@ -83,7 +95,7 @@ function NoteDetail({ note, onBack }) {
         <input
           type="text"
           value={title}
-          onChange={e => setTitle(e.target.value)}
+          onChange={handleTitleChange}
           style={{
             width: '100%',
             border: 'none',
@@ -97,7 +109,7 @@ function NoteDetail({ note, onBack }) {
 
       <div>
         {blocks.map(block => (
-          <Block key={block.id} block={block} />
+          <Block key={block.id} block={block} onChange={handleBlockChange} />
         ))}
 
         <button
