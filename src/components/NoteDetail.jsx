@@ -99,25 +99,33 @@ function Block({ block, onChange, onDelete, onDuplicate }) {
 
 function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   const [title, setTitle] = useState(note.title)
+  const [noteBody, setNoteBody] = useState(note.body || '')
+  const [titleCollapsed, setTitleCollapsed] = useState(true)
   const [blocks, setBlocks] = useState(note.blocks)
   const [menuOpen, setMenuOpen] = useState(false)
 
   const handleTitleChange = (e) => {
     const newTitle = e.target.value
     setTitle(newTitle)
-    onUpdate({ ...note, title: newTitle, blocks })
+    onUpdate({ ...note, title: newTitle, body: noteBody, blocks })
+  }
+
+  const handleNoteBodyChange = (e) => {
+    const newBody = e.target.value
+    setNoteBody(newBody)
+    onUpdate({ ...note, title, body: newBody, blocks })
   }
 
   const handleBlockChange = (updatedBlock) => {
     const newBlocks = blocks.map(b => b.id === updatedBlock.id ? updatedBlock : b)
     setBlocks(newBlocks)
-    onUpdate({ ...note, title, blocks: newBlocks })
+    onUpdate({ ...note, title, body: noteBody, blocks: newBlocks })
   }
 
   const handleBlockDelete = (blockId) => {
     const newBlocks = blocks.filter(b => b.id !== blockId)
     setBlocks(newBlocks)
-    onUpdate({ ...note, title, blocks: newBlocks })
+    onUpdate({ ...note, title, body: noteBody, blocks: newBlocks })
   }
 
   const handleBlockDuplicate = (block) => {
@@ -133,7 +141,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
       ...blocks.slice(index + 1)
     ]
     setBlocks(newBlocks)
-    onUpdate({ ...note, title, blocks: newBlocks })
+    onUpdate({ ...note, title, body: noteBody, blocks: newBlocks })
   }
 
   const addBlock = () => {
@@ -148,7 +156,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
     }
     const newBlocks = [...blocks, newBlock]
     setBlocks(newBlocks)
-    onUpdate({ ...note, title, blocks: newBlocks })
+    onUpdate({ ...note, title, body: noteBody, blocks: newBlocks })
   }
 
   const handleDelete = () => {
@@ -204,20 +212,48 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
         </div>
       </div>
 
-      <div style={{ marginBottom: '24px' }}>
-        <input
-          type="text"
-          value={title}
-          onChange={handleTitleChange}
-          style={{
-            width: '100%',
-            border: 'none',
-            fontSize: '24px',
-            fontWeight: 'bold',
-            outline: 'none',
-            fontFamily: 'var(--font-main)'
-          }}
-        />
+      <div style={{ marginBottom: '24px', borderBottom: '1px solid var(--color-border)', paddingBottom: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <input
+            type="text"
+            value={title}
+            onChange={handleTitleChange}
+            placeholder="Título"
+            style={{
+              width: '100%',
+              border: 'none',
+              fontSize: '24px',
+              fontWeight: 'bold',
+              outline: 'none',
+              fontFamily: 'var(--font-main)'
+            }}
+          />
+          <span
+            onClick={() => setTitleCollapsed(!titleCollapsed)}
+            style={{ color: 'var(--color-text-light)', cursor: 'pointer', fontSize: '18px', paddingLeft: '8px' }}
+          >
+            {titleCollapsed ? '▸' : '▾'}
+          </span>
+        </div>
+
+        {!titleCollapsed && (
+          <textarea
+            value={noteBody}
+            onChange={handleNoteBodyChange}
+            placeholder="Escribe algo..."
+            style={{
+              marginTop: '8px',
+              width: '100%',
+              minHeight: '80px',
+              border: 'none',
+              outline: 'none',
+              fontFamily: 'var(--font-main)',
+              fontSize: '14px',
+              color: 'var(--color-text-light)',
+              resize: 'none'
+            }}
+          />
+        )}
       </div>
 
       <div>
