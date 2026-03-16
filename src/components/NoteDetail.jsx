@@ -1,15 +1,25 @@
 import { useState } from 'react'
 
-function Block({ block, onChange }) {
+function Block({ block, onChange, onDelete, onDuplicate }) {
   const [collapsed, setCollapsed] = useState(true)
+  const [contextMenu, setContextMenu] = useState(false)
+
+  const handleLongPress = (e) => {
+    e.preventDefault()
+    setContextMenu(true)
+  }
 
   return (
-    <div style={{ borderBottom: '1px solid var(--color-border)', padding: '12px 0' }}>
+    <div
+      style={{ borderBottom: '1px solid var(--color-border)', padding: '12px 0', position: 'relative' }}
+      onClick={() => setContextMenu(false)}
+    >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <input
           type="text"
           value={block.title}
           onChange={e => onChange({ ...block, title: e.target.value })}
+          onContextMenu={handleLongPress}
           placeholder="Título del bloque"
           style={{
             border: 'none',
@@ -45,6 +55,44 @@ function Block({ block, onChange }) {
           }}
         />
       )}
+
+      {contextMenu && (
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            position: 'absolute',
+            right: '0',
+            top: '0',
+            background: 'white',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius)',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+            zIndex: 10,
+            minWidth: '160px'
+          }}
+        >
+          <div
+            onClick={() => {
+              onDuplicate(block)
+              setContextMenu(false)
+            }}
+            style={{ padding: '12px 16px', cursor: 'pointer', fontSize: '14px' }}
+          >
+            Duplicar bloque
+          </div>
+          <div
+            onClick={() => {
+              if (window.confirm('¿Eliminar este bloque?')) {
+                onDelete(block.id)
+              }
+              setContextMenu(false)
+            }}
+            style={{ padding: '12px 16px', cursor: 'pointer', fontSize: '14px', color: 'red' }}
+          >
+            Eliminar bloque
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -62,6 +110,28 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
 
   const handleBlockChange = (updatedBlock) => {
     const newBlocks = blocks.map(b => b.id === updatedBlock.id ? updatedBlock : b)
+    setBlocks(newBlocks)
+    onUpdate({ ...note, title, blocks: newBlocks })
+  }
+
+  const handleBlockDelete = (blockId) => {
+    const newBlocks = blocks.filter(b => b.id !== blockId)
+    setBlocks(newBlocks)
+    onUpdate({ ...note, title, blocks: newBlocks })
+  }
+
+  const handleBlockDuplicate = (block) => {
+    const duplicated = {
+      ...block,
+      id: Date.now().toString(),
+      order: block.order + 1
+    }
+    const index = blocks.findIndex(b => b.id === block.id)
+    const newBlocks = [
+      ...blocks.slice(0, index + 1),
+      duplicated,
+      ...blocks.slice(index + 1)
+    ]
     setBlocks(newBlocks)
     onUpdate({ ...note, title, blocks: newBlocks })
   }
@@ -118,7 +188,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
               minWidth: '160px'
             }}>
               <div
-                onClick={() => { setMenuOpen(false) }}
+                onClick={() => setMenuOpen(false)}
                 style={{ padding: '12px 16px', cursor: 'pointer', fontSize: '14px' }}
               >
                 Exportar
@@ -152,7 +222,13 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
 
       <div>
         {blocks.map(block => (
-          <Block key={block.id} block={block} onChange={handleBlockChange} />
+          <Block
+            key={block.id}
+            block={block}
+            onChange={handleBlockChange}
+            onDelete={handleBlockDelete}
+            onDuplicate={handleBlockDuplicate}
+          />
         ))}
 
         <button
