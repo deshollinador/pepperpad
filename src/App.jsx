@@ -1,3 +1,4 @@
+// src/App.jsx
 import { useState, useEffect } from 'react'
 import NoteList from './components/NoteList'
 import NoteDetail from './components/NoteDetail'
@@ -18,18 +19,29 @@ function App() {
     const newNote = {
       id: Date.now().toString(),
       templateType: 'simple',
-      title: 'Nueva nota',
+      title: '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      blocks: []
+      blocks: [
+        {
+          id: Date.now().toString() + '-block',
+          title: '',
+          body: '',
+          attributes: [],
+          children: [],
+          collapsed: false,
+          order: 0
+        }
+      ]
     }
     setNotes([newNote, ...notes])
     setSelectedNote(newNote)
   }
 
   const updateNote = (updatedNote) => {
-    setNotes(notes.map(n => n.id === updatedNote.id ? updatedNote : n))
-    setSelectedNote(updatedNote)
+    const updated = { ...updatedNote, updatedAt: new Date().toISOString() }
+    setNotes(notes.map(n => n.id === updated.id ? updated : n))
+    setSelectedNote(updated)
   }
 
   const deleteNote = (noteId) => {
@@ -41,11 +53,25 @@ function App() {
     const duplicated = {
       ...note,
       id: Date.now().toString(),
-      title: note.title + ' (copia)',
+      title: note.title ? note.title + ' (copia)' : '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     }
     setNotes([duplicated, ...notes])
+  }
+
+  const handleBack = (note) => {
+    const isEmpty = !note.title.trim() &&
+      note.blocks.every(b =>
+        !b.title.trim() && !b.body.trim() &&
+        (b.children || []).every(c => !c.title.trim() && !c.body.trim())
+      )
+
+    if (isEmpty) {
+      deleteNote(note.id)
+    } else {
+      setSelectedNote(null)
+    }
   }
 
   return (
@@ -53,7 +79,7 @@ function App() {
       {selectedNote ? (
         <NoteDetail
           note={selectedNote}
-          onBack={() => setSelectedNote(null)}
+          onBack={handleBack}
           onUpdate={updateNote}
           onDelete={deleteNote}
         />
