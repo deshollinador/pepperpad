@@ -2,6 +2,40 @@
 import { useState, useRef, useEffect } from 'react'
 import Block from './Block'
 
+// ─── constantes monetarias ────────────────────────────────────
+const MONETARY = ['€', '$', '£']
+const isMonetary = (label) => MONETARY.includes(label)
+
+// ─── calcular total de la nota ────────────────────────────────
+const computeNoteTotal = (blocks) => {
+  let total = 0
+  let currency = null
+
+  for (const block of blocks) {
+    const attrs = block.attributes || []
+    const monetaryAttr = attrs.find(a => isMonetary(a.label))
+    if (!monetaryAttr) continue
+
+    const udsAttr = attrs.find(a => a.label === 'uds' || a.label === 'u')
+    if (attrs.length === 2 && udsAttr) {
+      const qty = parseFloat(udsAttr.value)
+      const price = parseFloat(monetaryAttr.value)
+      if (!isNaN(qty) && !isNaN(price)) {
+        total += qty * price
+        currency = monetaryAttr.label
+      }
+    } else {
+      const val = parseFloat(monetaryAttr.value)
+      if (!isNaN(val)) {
+        total += val
+        currency = monetaryAttr.label
+      }
+    }
+  }
+
+  return currency ? { total: Math.round(total * 100) / 100, currency } : null
+}
+
 function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   const [title, setTitle] = useState(note.title)
   const [blocks, setBlocks] = useState(note.blocks)
@@ -13,6 +47,14 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   const firstBlockRef = useRef(null)
 
   const hasMultipleBlocks = blocks.length > 1
+
+  // Recoger todas las unidades usadas en la nota para sugerencias
+  const allAttributes = blocks.flatMap(b => [
+    ...(b.attributes || []),
+    ...(b.children || []).flatMap(c => c.attributes || [])
+  ])
+
+  const noteTotal = hasMultipleBlocks ? computeNoteTotal(blocks) : null
 
   useEffect(() => {
     if (!note.title && note.blocks.length === 1 && !note.blocks[0].title && !note.blocks[0].body) {
@@ -41,7 +83,6 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   }
 
   const handleBlockDelete = (id) => {
-    // no permitir borrar el último bloque
     if (blocks.length === 1) return
     save(removeBlock(blocks, id))
   }
@@ -71,28 +112,27 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
     save(blocks.map(b => b.id === parentId ? { ...b, children: [...(b.children || []), child] } : b))
   }
 
-  
-const addBlock = () => {
-  let currentBlocks = blocks
-  if (blocks.length === 1 && blocks[0].body.trim() && !blocks[0].title.trim()) {
-    currentBlocks = [{ ...blocks[0], id: Date.now().toString() + '-migrated', title: blocks[0].body, body: '', collapsed: true }]
-  } else {
-    currentBlocks = currentBlocks.map(b => ({ ...b, id: b.id + '-r', collapsed: true }))
-  }
+  const addBlock = () => {
+    let currentBlocks = blocks
+    if (blocks.length === 1 && blocks[0].body.trim() && !blocks[0].title.trim()) {
+      currentBlocks = [{ ...blocks[0], id: Date.now().toString() + '-migrated', title: blocks[0].body, body: '', collapsed: true }]
+    } else {
+      currentBlocks = currentBlocks.map(b => ({ ...b, id: b.id + '-r', collapsed: true }))
+    }
 
-  const b = {
-    id: Date.now().toString(),
-    title: '',
-    body: '',
-    attributes: [],
-    children: [],
-    collapsed: true,
-    order: currentBlocks.length
+    const b = {
+      id: Date.now().toString(),
+      title: '',
+      body: '',
+      attributes: [],
+      children: [],
+      collapsed: true,
+      order: currentBlocks.length
+    }
+    const newBlocks = [...currentBlocks, b]
+    setBlocks(newBlocks)
+    onUpdate({ ...note, title, blocks: newBlocks })
   }
-  const newBlocks = [...currentBlocks, b]
-  setBlocks(newBlocks)
-  onUpdate({ ...note, title, blocks: newBlocks })
-}
 
   const handleDragStart = (block, parentId) => {
     dragInfo.current = { block, parentId }
@@ -117,12 +157,8 @@ const addBlock = () => {
       let targetIndex = blocks.length
       for (let i = 0; i < topBlockEls.length; i++) {
         const rect = topBlockEls[i].getBoundingClientRect()
-        if (y < rect.top + rect.height / 2) {
-          targetIndex = i
-          break
-        }
+        if (y < rect.top + rect.height / 2) { targetIndex = i; break }
       }
-
       setDropIndicator({ type: 'between', beforeIndex: targetIndex, parentId: null })
     } else {
       const parentBlock = blocks.find(b => b.id === parentId)
@@ -137,12 +173,8 @@ const addBlock = () => {
       let targetIndex = parentBlock.children.length
       for (let i = 0; i < childEls.length; i++) {
         const rect = childEls[i].getBoundingClientRect()
-        if (y < rect.top + rect.height / 2) {
-          targetIndex = i
-          break
-        }
+        if (y < rect.top + rect.height / 2) { targetIndex = i; break }
       }
-
       setDropIndicator({ type: 'between', beforeIndex: targetIndex, parentId })
     }
   }
@@ -213,26 +245,34 @@ const addBlock = () => {
         </div>
       </div>
 
-      {/* título */}
+      {/* título de la nota */}
       <input
-  type="text"
-  value={title}
-  onChange={e => {
-    setTitle(e.target.value)
-    onUpdate({ ...note, title: e.target.value, blocks })
-  }}
-  placeholder="Título"
-  style={{
-    width: '100%',
-    border: 'none',
-    fontSize: '20px',
-    fontWeight: '600',
-    outline: 'none',
-    fontFamily: 'var(--font-main)',
-    marginBottom: '12px',
-    color: 'var(--color-text)'
-  }}
-/>
+        type="text"
+        value={title}
+        onChange={e => {
+          setTitle(e.target.value)
+          onUpdate({ ...note, title: e.target.value, blocks })
+        }}
+        placeholder="Título"
+        style={{
+          width: '100%', border: 'none', fontSize: '20px', fontWeight: '600',
+          outline: 'none', fontFamily: 'var(--font-main)', marginBottom: '4px',
+          color: 'var(--color-text)'
+        }}
+      />
+
+      {/* total de la nota */}
+      {noteTotal && (
+        <div style={{
+          fontSize: '13px', color: 'var(--color-text-light)',
+          marginBottom: '16px', textAlign: 'right',
+          fontVariantNumeric: 'tabular-nums'
+        }}>
+          {noteTotal.total}{noteTotal.currency}
+        </div>
+      )}
+
+      {!noteTotal && <div style={{ marginBottom: '16px' }} />}
 
       {/* bloques */}
       <div
@@ -260,6 +300,7 @@ const addBlock = () => {
               dragInfo={dragInfo}
               inputRef={i === 0 ? firstBlockRef : null}
               showDivider={hasMultipleBlocks}
+              allAttributes={allAttributes}
             />
           </div>
         ))}
@@ -270,22 +311,14 @@ const addBlock = () => {
       </div>
 
       {/* añadir bloque */}
-<button
-  onClick={addBlock}
-  style={{
-    position: 'fixed',
-    bottom: '24px',
-    left: '24px',
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    color: 'var(--color-text-light)',
-    fontSize: '13px',
-    padding: '0'
-  }}
->
-  + Nuevo
-</button>
+      <button
+        onClick={addBlock}
+        style={{
+          position: 'fixed', bottom: '24px', left: '24px',
+          background: 'none', border: 'none', cursor: 'pointer',
+          color: 'var(--color-text-light)', fontSize: '13px', padding: '0'
+        }}
+      >+ Nuevo</button>
     </div>
   )
 }
