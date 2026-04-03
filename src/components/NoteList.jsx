@@ -116,12 +116,28 @@ function NoteList({ notes, onSelectNote, onCreateNote, onDeleteNote, onDuplicate
         })}
       </div>
 
+      {/* botón + centrado visualmente */}
       <button
         onClick={onCreateNote}
-        style={{ position: 'fixed', bottom: '24px', right: '24px', width: '52px', height: '52px', borderRadius: '50%', background: 'var(--color-text)', color: 'var(--color-bg)', fontSize: '28px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-      >
-        +
-      </button>
+        style={{
+          position: 'fixed',
+          bottom: '24px',
+          right: '24px',
+          width: '52px',
+          height: '52px',
+          borderRadius: '50%',
+          background: 'var(--color-text)',
+          color: 'var(--color-bg)',
+          fontSize: '32px',
+          lineHeight: '1',
+          border: 'none',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingBottom: '2px'
+        }}
+      >+</button>
     </div>
   )
 }

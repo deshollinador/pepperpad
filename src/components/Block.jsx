@@ -11,18 +11,13 @@ const computeBlockTotal = (attributes) => {
   const monetaryAttrs = attrs.filter(a => isMonetary(a.label))
   const udsAttr = attrs.find(a => a.label === 'uds' || a.label === 'u')
 
-  // Única regla: exactamente 1 uds + exactamente 1 monetario + total 2 atributos
-  if (
-    attrs.length === 2 &&
-    udsAttr &&
-    monetaryAttrs.length === 1
-  ) {
+  if (attrs.length === 2 && udsAttr && monetaryAttrs.length === 1) {
     const qty = parseFloat(udsAttr.value)
     const price = parseFloat(monetaryAttrs[0].value)
     if (!isNaN(qty) && !isNaN(price)) {
       return {
         hasCalc: true,
-        total: qty * price,
+        total: Math.round(qty * price * 100) / 100,
         currency: monetaryAttrs[0].label,
         pricePerUnit: price,
         qty
@@ -30,7 +25,6 @@ const computeBlockTotal = (attributes) => {
     }
   }
 
-  // Sin cálculo — si hay monetario, ese es el total directo
   if (monetaryAttrs.length === 1) {
     const val = parseFloat(monetaryAttrs[0].value)
     if (!isNaN(val)) {
@@ -79,10 +73,14 @@ const parseInlineAttributes = (raw) => {
   return { cleanTitle, attrs: sortAttributes(attrs) }
 }
 
+// ─── detectar si un texto contiene tokens @ ──────────────────
+const hasInlineTokens = (text) =>
+  /(?:^|(?<=\s))[@=]\s*-?\d+\.?\d*\s*[a-zA-Z%$€£°\/²³]*/.test(text)
+
 function Block({
   block, depth, onChange, onDelete, onDuplicate, onAddChild,
-  onDragStart, onDragEnd, isDropTarget, childDropIndicator, dragInfo, inputRef, showDivider,
-  allAttributes
+  onDragStart, onDragEnd, childDropIndicator, dragInfo, inputRef, showDivider,
+  allAttributes, onConvertToStructured
 }) {
   const [expanded, setExpanded] = useState(!block.collapsed)
   const [showHandle, setShowHandle] = useState(false)
@@ -197,33 +195,33 @@ function Block({
   }
 
   // ─── render atributos en línea (colapsado) ───────────────────
- const renderAttributeLine = () => {
-  const attrs = (block.attributes || []).filter(a => a.value || a.label)
-  if (attrs.length === 0 && !blockTotal) return null
+  const renderAttributeLine = () => {
+    const attrs = (block.attributes || []).filter(a => a.value || a.label)
+    if (attrs.length === 0 && !blockTotal) return null
 
-  const nonMonetary = attrs.filter(a => !isMonetary(a.label))
-  const monetaryAttr = attrs.find(a => isMonetary(a.label))
+    const nonMonetary = attrs.filter(a => !isMonetary(a.label))
+    const monetaryAttr = attrs.find(a => isMonetary(a.label))
 
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end' }}>
-      {nonMonetary.map((a) => (
-        <span key={a.id} style={{ color: 'var(--color-text-light)', fontSize: '14px' }}>
-          {a.value}{a.label}
-        </span>
-      ))}
-      {blockTotal?.hasCalc && (
-        <span style={{ color: 'var(--color-text)', fontSize: '14px', fontVariantNumeric: 'tabular-nums' }}>
-          {blockTotal.pricePerUnit}{blockTotal.currency}/ud = {blockTotal.total}{blockTotal.currency}
-        </span>
-      )}
-      {!blockTotal?.hasCalc && monetaryAttr && (
-        <span style={{ color: 'var(--color-text)', fontSize: '14px', fontVariantNumeric: 'tabular-nums' }}>
-          {monetaryAttr.value}{monetaryAttr.label}
-        </span>
-      )}
-    </div>
-  )
-}
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end' }}>
+        {nonMonetary.map((a) => (
+          <span key={a.id} style={{ color: 'var(--color-text-light)', fontSize: '14px' }}>
+            {a.value}{a.label}
+          </span>
+        ))}
+        {blockTotal?.hasCalc && (
+          <span style={{ color: 'var(--color-text)', fontSize: '14px', fontVariantNumeric: 'tabular-nums' }}>
+            {blockTotal.pricePerUnit}{blockTotal.currency}/ud = {blockTotal.total}{blockTotal.currency}
+          </span>
+        )}
+        {!blockTotal?.hasCalc && monetaryAttr && (
+          <span style={{ color: 'var(--color-text)', fontSize: '14px', fontVariantNumeric: 'tabular-nums' }}>
+            {monetaryAttr.value}{monetaryAttr.label}
+          </span>
+        )}
+      </div>
+    )
+  }
 
   // ─── modo simple ─────────────────────────────────────────────
   if (isSimpleMode) {
@@ -232,12 +230,34 @@ function Block({
         <textarea
           ref={inputRef}
           value={block.body}
-          onChange={e => onChange({ ...block, body: e.target.value })}
+          onChange={e => {
+            onChange({ ...block, body: e.target.value })
+            // auto-resize
+            e.target.style.height = 'auto'
+            e.target.style.height = e.target.scrollHeight + 'px'
+          }}
+          onBlur={e => {
+            // si el usuario escribió tokens @, convertir a modo lista
+            if (hasInlineTokens(e.target.value) && onConvertToStructured) {
+              onConvertToStructured(block, e.target.value)
+            }
+          }}
           placeholder="Nota"
+          rows={1}
           style={{
-            width: '100%', minHeight: '200px', border: 'none', outline: 'none',
-            fontFamily: 'var(--font-main)', fontSize: '16px', color: 'var(--color-text)',
-            resize: 'none', lineHeight: '1.6', background: 'transparent'
+            width: '100%',
+            minHeight: '28px',
+            border: 'none',
+            outline: 'none',
+            fontFamily: 'var(--font-main)',
+            fontSize: '15px',
+            color: 'var(--color-text)',
+            resize: 'none',
+            lineHeight: '1.6',
+            background: 'transparent',
+            display: 'block',
+            boxSizing: 'border-box',
+            overflow: 'hidden'
           }}
         />
       </div>
@@ -268,9 +288,15 @@ function Block({
           onDragEnd={handleDragEnd}
           onClick={e => e.stopPropagation()}
           style={{
-            cursor: 'grab', color: 'var(--color-text-light)', fontSize: '14px',
-            opacity: showHandle ? 1 : 0, transition: 'opacity 0.15s',
-            userSelect: 'none', flexShrink: 0, lineHeight: 1
+            cursor: 'grab',
+            color: 'var(--color-text-light)',
+            fontSize: '18px',
+            opacity: showHandle ? 1 : 0,
+            transition: 'opacity 0.15s',
+            userSelect: 'none',
+            flexShrink: 0,
+            lineHeight: 1,
+            padding: '8px 4px',
           }}
         >⠿</div>
 
@@ -278,8 +304,16 @@ function Block({
         <div
           onClick={e => { e.stopPropagation(); setExpanded(prev => !prev) }}
           style={{
-            flexShrink: 0, width: '12px', color: 'var(--color-text-light)',
-            fontSize: '9px', cursor: 'pointer', userSelect: 'none', lineHeight: 1, opacity: 0.5
+            flexShrink: 0,
+            width: '28px',
+            height: '28px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--color-text-light)',
+            fontSize: '14px',
+            cursor: 'pointer',
+            userSelect: 'none',
           }}
         >{expanded ? '▾' : '▸'}</div>
 
@@ -304,10 +338,7 @@ function Block({
 
         {/* atributos en línea cuando colapsado */}
         {hasAttributes && !expanded && !isEditingTitle && (
-          <div
-            style={{ flexShrink: 0 }}
-            onClick={e => e.stopPropagation()}
-          >
+          <div style={{ flexShrink: 0 }} onClick={e => e.stopPropagation()}>
             {renderAttributeLine()}
           </div>
         )}
@@ -318,7 +349,8 @@ function Block({
             onClick={e => { e.stopPropagation(); setMenuOpen(!menuOpen) }}
             style={{
               background: 'none', border: 'none', cursor: 'pointer',
-              color: 'var(--color-text-light)', fontSize: '16px', padding: '0 4px',
+              color: 'var(--color-text-light)', fontSize: '18px',
+              padding: '8px 4px',
               opacity: showHandle ? 1 : 0, transition: 'opacity 0.15s'
             }}
           >···</button>
@@ -326,18 +358,18 @@ function Block({
             <div
               onClick={e => e.stopPropagation()}
               style={{
-                position: 'absolute', right: '0', top: '28px', background: 'white',
+                position: 'absolute', right: '0', top: '36px', background: 'white',
                 border: '1px solid var(--color-border)', borderRadius: 'var(--radius)',
                 boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 10, minWidth: '140px'
               }}
             >
               <div onClick={() => { onDuplicate(block); setMenuOpen(false) }}
-                style={{ padding: '10px 14px', cursor: 'pointer', fontSize: '14px' }}>
+                style={{ padding: '12px 16px', cursor: 'pointer', fontSize: '15px' }}>
                 Duplicar
               </div>
               <div
                 onClick={() => { if (window.confirm('¿Eliminar?')) onDelete(block.id); setMenuOpen(false) }}
-                style={{ padding: '10px 14px', cursor: 'pointer', fontSize: '14px', color: 'red' }}>
+                style={{ padding: '12px 16px', cursor: 'pointer', fontSize: '15px', color: 'red' }}>
                 Eliminar
               </div>
             </div>
@@ -347,29 +379,10 @@ function Block({
 
       {/* ── contenido desplegado ── */}
       {expanded && (
-        <div style={{ paddingLeft: '22px', paddingBottom: '12px' }}>
-
-          {/* campo de texto */}
-          <textarea
-            value={block.body}
-            onChange={e => onChange({ ...block, body: e.target.value })}
-            placeholder="Escribe algo..."
-            rows={1}
-            style={{
-              width: '100%', border: 'none', outline: 'none',
-              fontFamily: 'var(--font-main)', fontSize: '14px',
-              color: 'var(--color-text)', resize: 'none', lineHeight: '1.5',
-              background: 'rgba(0,0,0,0.04)', borderRadius: '4px',
-              padding: '6px 8px', marginBottom: '12px', boxSizing: 'border-box'
-            }}
-            onInput={e => {
-              e.target.style.height = 'auto'
-              e.target.style.height = e.target.scrollHeight + 'px'
-            }}
-          />
+        <div style={{ paddingLeft: '36px', paddingBottom: '12px' }}>
 
           {/* atributos */}
-          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
             {(block.attributes || []).map(attr => {
               const suggestions = getLabelSuggestions(attr.label)
               return (
@@ -378,7 +391,7 @@ function Block({
                   style={{
                     display: 'flex', alignItems: 'center', gap: '4px',
                     background: 'rgba(0,0,0,0.06)', borderRadius: '20px',
-                    padding: '3px 10px', fontSize: '13px', position: 'relative'
+                    padding: '4px 12px', fontSize: '14px', position: 'relative'
                   }}
                 >
                   {editingAttrId === attr.id ? (
@@ -388,14 +401,14 @@ function Block({
                         value={attr.value}
                         onChange={e => updateAttribute(attr.id, 'value', e.target.value)}
                         placeholder="valor"
-                        style={{ width: '44px', border: 'none', outline: 'none', background: 'transparent', fontSize: '13px', fontFamily: 'var(--font-main)' }}
+                        style={{ width: '48px', border: 'none', outline: 'none', background: 'transparent', fontSize: '14px', fontFamily: 'var(--font-main)' }}
                       />
                       <div style={{ position: 'relative' }}>
                         <input
                           value={attr.label}
                           onChange={e => updateAttribute(attr.id, 'label', e.target.value)}
                           placeholder="unidad"
-                          style={{ width: '44px', border: 'none', outline: 'none', background: 'transparent', fontSize: '13px', fontFamily: 'var(--font-main)' }}
+                          style={{ width: '48px', border: 'none', outline: 'none', background: 'transparent', fontSize: '14px', fontFamily: 'var(--font-main)' }}
                           onBlur={e => {
                             normalizeLabel(attr.id, e.target.value)
                             setEditingAttrId(null)
@@ -416,7 +429,7 @@ function Block({
                                   normalizeLabel(attr.id, s)
                                   setEditingAttrId(null)
                                 }}
-                                style={{ padding: '6px 10px', cursor: 'pointer', fontSize: '13px' }}
+                                style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '14px' }}
                               >{s}</div>
                             ))}
                           </div>
@@ -425,7 +438,7 @@ function Block({
                       <span
                         onClick={() => toggleAttributeSum(attr.id)}
                         title="Incluir en totales"
-                        style={{ cursor: 'pointer', fontSize: '12px', opacity: attr.sum ? 1 : 0.3, userSelect: 'none' }}
+                        style={{ cursor: 'pointer', fontSize: '13px', opacity: attr.sum ? 1 : 0.3, userSelect: 'none' }}
                       >Σ</span>
                     </>
                   ) : (
@@ -435,7 +448,7 @@ function Block({
                   )}
                   <span
                     onClick={e => { e.stopPropagation(); deleteAttribute(attr.id) }}
-                    style={{ cursor: 'pointer', color: 'var(--color-text-light)', fontSize: '12px', lineHeight: 1 }}
+                    style={{ cursor: 'pointer', color: 'var(--color-text-light)', fontSize: '14px', lineHeight: 1 }}
                   >×</span>
                 </div>
               )
@@ -446,13 +459,31 @@ function Block({
                 onClick={addAttribute}
                 style={{
                   background: 'none', border: '1px dashed var(--color-border)',
-                  borderRadius: '20px', padding: '3px 10px', fontSize: '13px',
+                  borderRadius: '20px', padding: '4px 12px', fontSize: '14px',
                   cursor: 'pointer', color: 'var(--color-text-light)', fontFamily: 'var(--font-main)'
                 }}
               >+ Atributo</button>
             )}
-
           </div>
+
+          {/* campo de texto */}
+          <textarea
+            value={block.body}
+            onChange={e => onChange({ ...block, body: e.target.value })}
+            placeholder="Escribe algo..."
+            rows={1}
+            style={{
+              width: '100%', border: 'none', outline: 'none',
+              fontFamily: 'var(--font-main)', fontSize: '14px',
+              color: 'var(--color-text)', resize: 'none', lineHeight: '1.5',
+              background: 'rgba(0,0,0,0.04)', borderRadius: '4px',
+              padding: '8px 10px', marginBottom: '10px', boxSizing: 'border-box'
+            }}
+            onInput={e => {
+              e.target.style.height = 'auto'
+              e.target.style.height = e.target.scrollHeight + 'px'
+            }}
+          />
 
           {/* hijos */}
           {depth === 0 && (
@@ -474,7 +505,6 @@ function Block({
                       onDragStart(b, block.id)
                     }}
                     onDragEnd={onDragEnd}
-                    isDropTarget={false}
                     dragInfo={dragInfo}
                     showDivider={true}
                     allAttributes={allAttributes}
@@ -488,8 +518,8 @@ function Block({
                 onClick={() => onAddChild(block.id)}
                 style={{
                   background: 'none', border: 'none', cursor: 'pointer',
-                  color: 'var(--color-text-light)', fontSize: '13px',
-                  padding: '4px 0', marginLeft: '8px'
+                  color: 'var(--color-text-light)', fontSize: '14px',
+                  padding: '6px 0', marginLeft: '8px'
                 }}
               >+ Nuevo</button>
             </div>

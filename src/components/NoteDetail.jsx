@@ -1,12 +1,10 @@
 // src/components/NoteDetail.jsx
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import Block from './Block'
 
-// ─── constantes monetarias ────────────────────────────────────
 const MONETARY = ['€', '$', '£']
 const isMonetary = (label) => MONETARY.includes(label)
 
-// ─── calcular total de la nota ────────────────────────────────
 const computeNoteTotal = (blocks) => {
   let total = 0
   let currency = null
@@ -36,25 +34,75 @@ const computeNoteTotal = (blocks) => {
   return currency ? { total: Math.round(total * 100) / 100, currency } : null
 }
 
+const isBlockEmpty = (block) =>
+  !block.title?.trim() && !block.body?.trim() && (block.attributes || []).length === 0
+
+// ─── parser inline (mismo que Block.jsx) ─────────────────────
+const parseInlineAttributes = (raw) => {
+  const tokenRegex = /(?:^|(?<=\s))[@=]\s*(-?\d+\.?\d*)\s*([a-zA-Z%$€£°\/²³]*)/g
+  const attrs = []
+  let match
+  while ((match = tokenRegex.exec(raw)) !== null) {
+    const value = match[1]
+    const label = match[2].toLowerCase()
+    const isM = MONETARY.includes(label)
+    attrs.push({ id: Date.now().toString() + Math.random(), value, label, sum: isM })
+  }
+  const cleanTitle = raw
+    .replace(/(?:^|(?<=\s))[@=]\s*-?\d+\.?\d*\s*[a-zA-Z%$€£°\/²³]*/g, '')
+    .trim()
+  const nonMoney = attrs.filter(a => !MONETARY.includes(a.label))
+  const money = attrs.filter(a => MONETARY.includes(a.label))
+  return { cleanTitle, attrs: [...nonMoney, ...money] }
+}
+
 function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   const [title, setTitle] = useState(note.title)
   const [blocks, setBlocks] = useState(note.blocks)
   const [menuOpen, setMenuOpen] = useState(false)
   const [dropIndicator, setDropIndicator] = useState(null)
+  const [totalVisible, setTotalVisible] = useState(true)
+  const [newBlockId, setNewBlockId] = useState(null)
 
   const dragInfo = useRef(null)
   const blocksRef = useRef(null)
   const firstBlockRef = useRef(null)
+  // ref apunta solo al número del total, no al wrapper con la línea
+  const totalNumberRef = useRef(null)
+  const newBlockTitleRef = useRef(null)
+  const observerRef = useRef(null)
 
-  const hasMultipleBlocks = blocks.length > 1
+  const isStructured = note.isStructured || blocks.length > 1
 
-  // Recoger todas las unidades usadas en la nota para sugerencias
   const allAttributes = blocks.flatMap(b => [
     ...(b.attributes || []),
     ...(b.children || []).flatMap(c => c.attributes || [])
   ])
 
-  const noteTotal = hasMultipleBlocks ? computeNoteTotal(blocks) : null
+  const noteTotal = isStructured ? computeNoteTotal(blocks) : null
+
+  // ─── observer apuntando solo al número ───────────────────────
+  const observeTotalNumber = useCallback(() => {
+    if (observerRef.current) observerRef.current.disconnect()
+    if (!totalNumberRef.current) return
+    observerRef.current = new IntersectionObserver(
+      ([entry]) => setTotalVisible(entry.isIntersecting),
+      { threshold: 0 }
+    )
+    observerRef.current.observe(totalNumberRef.current)
+  }, [])
+
+  useEffect(() => {
+    if (!noteTotal) {
+      setTotalVisible(true)
+      return
+    }
+    const t = setTimeout(observeTotalNumber, 50)
+    return () => {
+      clearTimeout(t)
+      observerRef.current?.disconnect()
+    }
+  }, [noteTotal, observeTotalNumber])
 
   useEffect(() => {
     if (!note.title && note.blocks.length === 1 && !note.blocks[0].title && !note.blocks[0].body) {
@@ -62,9 +110,16 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
     }
   }, [])
 
-  const save = (newBlocks, newTitle = title) => {
+  useEffect(() => {
+    if (newBlockId && newBlockTitleRef.current) {
+      newBlockTitleRef.current.focus()
+      setNewBlockId(null)
+    }
+  }, [newBlockId, blocks])
+
+  const save = (newBlocks, newTitle = title, extra = {}) => {
     setBlocks(newBlocks)
-    onUpdate({ ...note, title: newTitle, blocks: newBlocks })
+    onUpdate({ ...note, title: newTitle, blocks: newBlocks, ...extra })
   }
 
   const removeBlock = (list, id) =>
@@ -108,30 +163,66 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   }
 
   const handleAddChild = (parentId) => {
-    const child = { id: Date.now().toString(), title: '', body: '', attributes: [], children: [], collapsed: true, order: 0 }
+    const child = {
+      id: Date.now().toString(), title: '', body: '',
+      attributes: [], children: [], collapsed: true, order: 0
+    }
     save(blocks.map(b => b.id === parentId ? { ...b, children: [...(b.children || []), child] } : b))
+  }
+
+  // ─── conversión desde nota simple por @ ──────────────────────
+  const handleConvertToStructured = (block, rawBody) => {
+    const { cleanTitle, attrs } = parseInlineAttributes(rawBody)
+    // el body se convierte en título del primer bloque con sus atributos
+    const convertedBlock = {
+      ...block,
+      id: block.id + '-converted',
+      title: cleanTitle || rawBody.replace(/[@=]\S*/g, '').trim(),
+      body: '',
+      attributes: attrs,
+      collapsed: true
+    }
+    // crear segundo bloque vacío para que entre en modo lista
+    const newId = Date.now().toString()
+    const secondBlock = {
+      id: newId, title: '', body: '', attributes: [], children: [],
+      collapsed: true, order: 1
+    }
+    const newBlocks = [convertedBlock, secondBlock]
+    setBlocks(newBlocks)
+    onUpdate({ ...note, title, blocks: newBlocks, isStructured: true })
+    setNewBlockId(newId)
   }
 
   const addBlock = () => {
     let currentBlocks = blocks
     if (blocks.length === 1 && blocks[0].body.trim() && !blocks[0].title.trim()) {
-      currentBlocks = [{ ...blocks[0], id: Date.now().toString() + '-migrated', title: blocks[0].body, body: '', collapsed: true }]
+      currentBlocks = [{
+        ...blocks[0],
+        id: Date.now().toString() + '-migrated',
+        title: blocks[0].body,
+        body: '',
+        collapsed: true
+      }]
     } else {
       currentBlocks = currentBlocks.map(b => ({ ...b, id: b.id + '-r', collapsed: true }))
     }
 
+    const newId = Date.now().toString()
     const b = {
-      id: Date.now().toString(),
-      title: '',
-      body: '',
-      attributes: [],
-      children: [],
-      collapsed: true,
-      order: currentBlocks.length
+      id: newId, title: '', body: '', attributes: [], children: [],
+      collapsed: true, order: currentBlocks.length
     }
     const newBlocks = [...currentBlocks, b]
     setBlocks(newBlocks)
-    onUpdate({ ...note, title, blocks: newBlocks })
+    onUpdate({ ...note, title, blocks: newBlocks, isStructured: true })
+    setNewBlockId(newId)
+  }
+
+  const handleBack = () => {
+    const cleaned = blocks.filter(b => !isBlockEmpty(b))
+    const finalBlocks = cleaned.length > 0 ? cleaned : blocks.slice(0, 1)
+    onBack({ ...note, title, blocks: finalBlocks })
   }
 
   const handleDragStart = (block, parentId) => {
@@ -163,10 +254,8 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
     } else {
       const parentBlock = blocks.find(b => b.id === parentId)
       if (!parentBlock) return
-
       const parentEl = blocksRef.current.querySelector(`[data-block-id="${parentId}"]`)
       if (!parentEl) return
-
       const childEls = Array.from(parentEl.querySelectorAll('[data-block-id]'))
         .filter(el => el.dataset.depth === '1')
 
@@ -222,7 +311,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
       {/* header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
         <button
-          onClick={() => onBack({ ...note, title, blocks })}
+          onClick={handleBack}
           style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', padding: '0' }}
         >←</button>
         <div style={{ position: 'relative' }}>
@@ -233,9 +322,16 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
           {menuOpen && (
             <div
               onClick={e => e.stopPropagation()}
-              style={{ position: 'absolute', right: '0', top: '28px', background: 'white', border: '1px solid var(--color-border)', borderRadius: 'var(--radius)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 10, minWidth: '160px' }}
+              style={{
+                position: 'absolute', right: '0', top: '28px', background: 'white',
+                border: '1px solid var(--color-border)', borderRadius: 'var(--radius)',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 10, minWidth: '160px'
+              }}
             >
-              <div onClick={() => setMenuOpen(false)} style={{ padding: '12px 16px', cursor: 'pointer', fontSize: '14px' }}>Exportar</div>
+              <div onClick={() => setMenuOpen(false)}
+                style={{ padding: '12px 16px', cursor: 'pointer', fontSize: '14px' }}>
+                Exportar
+              </div>
               <div
                 onClick={() => { if (window.confirm('¿Eliminar esta nota?')) onDelete(note.id) }}
                 style={{ padding: '12px 16px', cursor: 'pointer', fontSize: '14px', color: 'red' }}
@@ -245,7 +341,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
         </div>
       </div>
 
-      {/* título de la nota */}
+      {/* título */}
       <input
         type="text"
         value={title}
@@ -261,18 +357,23 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
         }}
       />
 
-      {/* total de la nota */}
-      {noteTotal && (
+      {/* total superior — línea debajo, separa del listado */}
+      {noteTotal && !totalVisible && (
         <div style={{
-          fontSize: '13px', color: 'var(--color-text-light)',
-          marginBottom: '16px', textAlign: 'right',
-          fontVariantNumeric: 'tabular-nums'
+          marginTop: '8px',
+          paddingBottom: '12px',
+          borderBottom: '1px solid var(--color-border)',
+          textAlign: 'right',
+          fontSize: '15px',
+          fontWeight: '600',
+          fontVariantNumeric: 'tabular-nums',
+          color: 'var(--color-text)'
         }}>
-          {noteTotal.total}{noteTotal.currency}
+          Total: {noteTotal.total}{noteTotal.currency}
         </div>
       )}
 
-      {!noteTotal && <div style={{ marginBottom: '16px' }} />}
+      {!(noteTotal && !totalVisible) && <div style={{ marginBottom: '16px' }} />}
 
       {/* bloques */}
       <div
@@ -298,9 +399,10 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
               isDropTarget={false}
               childDropIndicator={dropIndicator?.parentId === block.id ? dropIndicator : null}
               dragInfo={dragInfo}
-              inputRef={i === 0 ? firstBlockRef : null}
-              showDivider={hasMultipleBlocks}
+              inputRef={block.id === newBlockId ? newBlockTitleRef : i === 0 ? firstBlockRef : null}
+              showDivider={isStructured}
               allAttributes={allAttributes}
+              onConvertToStructured={handleConvertToStructured}
             />
           </div>
         ))}
@@ -310,15 +412,43 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
         )}
       </div>
 
-      {/* añadir bloque */}
-      <button
+      {/* zona + — mismo estilo siempre */}
+      <div
         onClick={addBlock}
         style={{
-          position: 'fixed', bottom: '24px', left: '24px',
-          background: 'none', border: 'none', cursor: 'pointer',
-          color: 'var(--color-text-light)', fontSize: '13px', padding: '0'
+          minHeight: '60px',
+          cursor: 'text',
+          display: 'flex',
+          alignItems: 'center',
+          paddingLeft: '36px',
+          color: 'var(--color-text-light)',
+          fontSize: '14px',
+          opacity: 0.4,
+          userSelect: 'none'
         }}
-      >+ Nuevo</button>
+      >+</div>
+
+      {/* total inferior — línea arriba, ref solo en el número */}
+      {noteTotal && (
+        <div style={{
+          borderTop: '1px solid var(--color-border)',
+          marginTop: '8px',
+          paddingTop: '12px',
+          textAlign: 'right',
+        }}>
+          <span
+            ref={totalNumberRef}
+            style={{
+              fontSize: '15px',
+              fontWeight: '600',
+              fontVariantNumeric: 'tabular-nums',
+              color: 'var(--color-text)'
+            }}
+          >
+            Total: {noteTotal.total}{noteTotal.currency}
+          </span>
+        </div>
+      )}
     </div>
   )
 }

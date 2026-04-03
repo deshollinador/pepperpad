@@ -19,6 +19,7 @@ function App() {
     const newNote = {
       id: Date.now().toString(),
       templateType: 'simple',
+      isStructured: false,
       title: '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -61,15 +62,25 @@ function App() {
   }
 
   const handleBack = (note) => {
-    const isEmpty = !note.title.trim() &&
-      note.blocks.every(b =>
-        !b.title.trim() && !b.body.trim() &&
-        (b.children || []).every(c => !c.title.trim() && !c.body.trim())
+    // eliminar bloques vacíos antes de guardar
+    const isBlockEmpty = (b) =>
+      !b.title?.trim() && !b.body?.trim() && (b.attributes || []).length === 0
+
+    const cleanedBlocks = note.blocks.filter(b => !isBlockEmpty(b))
+    const finalBlocks = cleanedBlocks.length > 0 ? cleanedBlocks : note.blocks.slice(0, 1)
+    const finalNote = { ...note, blocks: finalBlocks }
+
+    // si la nota entera está vacía, eliminarla
+    const isEmpty = !finalNote.title.trim() &&
+      finalNote.blocks.every(b =>
+        !b.title?.trim() && !b.body?.trim() &&
+        (b.children || []).every(c => !c.title?.trim() && !c.body?.trim())
       )
 
     if (isEmpty) {
-      deleteNote(note.id)
+      deleteNote(finalNote.id)
     } else {
+      setNotes(notes.map(n => n.id === finalNote.id ? { ...finalNote, updatedAt: new Date().toISOString() } : n))
       setSelectedNote(null)
     }
   }
