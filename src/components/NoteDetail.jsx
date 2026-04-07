@@ -5,6 +5,13 @@ import Block from './Block'
 const MONETARY = ['€', '$', '£']
 const isMonetary = (label) => MONETARY.includes(label)
 
+// ─── formatear valor monetario con dos decimales y coma ───────
+const formatMonetary = (value) => {
+  const num = parseFloat(value)
+  if (isNaN(num)) return value
+  return num.toFixed(2).replace('.', ',')
+}
+
 const computeNoteTotal = (blocks) => {
   let total = 0
   let currency = null
@@ -37,7 +44,7 @@ const computeNoteTotal = (blocks) => {
 const isBlockEmpty = (block) =>
   !block.title?.trim() && !block.body?.trim() && (block.attributes || []).length === 0
 
-// ─── parser inline (mismo que Block.jsx) ─────────────────────
+// ─── parser inline ────────────────────────────────────────────
 const parseInlineAttributes = (raw) => {
   const tokenRegex = /(?:^|(?<=\s))[@=]\s*(-?\d+\.?\d*)\s*([a-zA-Z%$€£°\/²³]*)/g
   const attrs = []
@@ -67,10 +74,10 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   const dragInfo = useRef(null)
   const blocksRef = useRef(null)
   const firstBlockRef = useRef(null)
-  // ref apunta solo al número del total, no al wrapper con la línea
   const totalNumberRef = useRef(null)
   const newBlockTitleRef = useRef(null)
   const observerRef = useRef(null)
+  const blockInputRefs = useRef({})
 
   const isStructured = note.isStructured || blocks.length > 1
 
@@ -139,7 +146,23 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
 
   const handleBlockDelete = (id) => {
     if (blocks.length === 1) return
-    save(removeBlock(blocks, id))
+    const newBlocks = removeBlock(blocks, id)
+
+    // si queda un solo bloque sin atributos, volver a modo simple
+    if (newBlocks.length === 1 && (newBlocks[0].attributes || []).length === 0) {
+      const b = newBlocks[0]
+      // asegurar que el contenido queda en body para el textarea de modo simple
+      // si el contenido está en title (por migración previa), moverlo a body
+      const restoredBlock = {
+        ...b,
+        body: b.body?.trim() ? b.body : (b.title?.trim() ? b.title : ''),
+        title: '',
+        collapsed: false
+      }
+      save([restoredBlock], title, { isStructured: false })
+    } else {
+      save(newBlocks)
+    }
   }
 
   const handleBlockDuplicate = (block) => {
@@ -173,7 +196,6 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   // ─── conversión desde nota simple por @ ──────────────────────
   const handleConvertToStructured = (block, rawBody) => {
     const { cleanTitle, attrs } = parseInlineAttributes(rawBody)
-    // el body se convierte en título del primer bloque con sus atributos
     const convertedBlock = {
       ...block,
       id: block.id + '-converted',
@@ -182,7 +204,6 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
       attributes: attrs,
       collapsed: true
     }
-    // crear segundo bloque vacío para que entre en modo lista
     const newId = Date.now().toString()
     const secondBlock = {
       id: newId, title: '', body: '', attributes: [], children: [],
@@ -194,7 +215,15 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
     setNewBlockId(newId)
   }
 
+  // ─── añadir bloque: bloqueado si el último está vacío ────────
   const addBlock = () => {
+    const lastBlock = blocks[blocks.length - 1]
+    if (isBlockEmpty(lastBlock)) {
+      const lastRef = blockInputRefs.current[lastBlock.id]
+      if (lastRef) lastRef.focus()
+      return
+    }
+
     let currentBlocks = blocks
     if (blocks.length === 1 && blocks[0].body.trim() && !blocks[0].title.trim()) {
       currentBlocks = [{
@@ -306,6 +335,13 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
     }
   }
 
+  // ─── resolver ref de input para cada bloque ──────────────────
+  const resolveInputRef = (blockId, i) => {
+    if (blockId === newBlockId) return newBlockTitleRef
+    if (i === 0 && !isStructured) return firstBlockRef
+    return (el) => { blockInputRefs.current[blockId] = el }
+  }
+
   return (
     <div onClick={() => setMenuOpen(false)}>
       {/* header */}
@@ -369,7 +405,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
           fontVariantNumeric: 'tabular-nums',
           color: 'var(--color-text)'
         }}>
-          Total: {noteTotal.total}{noteTotal.currency}
+          Total: {formatMonetary(noteTotal.total)}{noteTotal.currency}
         </div>
       )}
 
@@ -399,7 +435,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
               isDropTarget={false}
               childDropIndicator={dropIndicator?.parentId === block.id ? dropIndicator : null}
               dragInfo={dragInfo}
-              inputRef={block.id === newBlockId ? newBlockTitleRef : i === 0 ? firstBlockRef : null}
+              inputRef={resolveInputRef(block.id, i)}
               showDivider={isStructured}
               allAttributes={allAttributes}
               onConvertToStructured={handleConvertToStructured}
@@ -412,7 +448,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
         )}
       </div>
 
-      {/* zona + — mismo estilo siempre */}
+      {/* zona + */}
       <div
         onClick={addBlock}
         style={{
@@ -445,7 +481,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
               color: 'var(--color-text)'
             }}
           >
-            Total: {noteTotal.total}{noteTotal.currency}
+            Total: {formatMonetary(noteTotal.total)}{noteTotal.currency}
           </span>
         </div>
       )}

@@ -1,0 +1,17 @@
+Quiero que cuando estén desplegados todos los bloques, si pincho fuera, en el fondo, se plieguen todos.
+
+Quiero que trabajemos ahora en el total.
+
+El total tendría un chevron, aunque distinto a los bloques de las listas. Esta vez estaría en el lado derecho del total y la punta de la flecha, en vez de apuntar hacia la derecha apuntaría hacia abajo. Por defecto estaría oculto
+
+Si se despliega aparecería un campo para escribir y el cursos parpadearía en ese campo. Entonces es cuando podría escribir: "IVA @21%" si doy a enter o al botón más, com en los bloque se añadiría ese elemnto y afectaría el total, viéndose algo así como:
+
+Subtotal: xxx,xx$
+IVA: 21%
+Total: xxx,xx$ (sumándole el 21%)
+
+Se podría agregar más campos, por si el cliente quiere agregar un descuento o lo que sea. Si se pliega se seguiría mostrando el total. 
+
+
+Qué te parece? Quiero que este sistema parezca invisible a ojos de alguien que no necesite esta función
+

@@ -1,9 +1,16 @@
 // src/components/Block.jsx
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 // ─── constantes ───────────────────────────────────────────────
 const MONETARY = ['€', '$', '£']
 const isMonetary = (label) => MONETARY.includes(label)
+
+// ─── formatear valor monetario ────────────────────────────────
+const formatMonetary = (value) => {
+  const num = parseFloat(value)
+  if (isNaN(num)) return value
+  return num.toFixed(2).replace('.', ',')
+}
 
 // ─── lógica de cálculo por bloque ────────────────────────────
 const computeBlockTotal = (attributes) => {
@@ -77,6 +84,13 @@ const parseInlineAttributes = (raw) => {
 const hasInlineTokens = (text) =>
   /(?:^|(?<=\s))[@=]\s*-?\d+\.?\d*\s*[a-zA-Z%$€£°\/²³]*/.test(text)
 
+// ─── auto-resize textarea ─────────────────────────────────────
+const autoResize = (el) => {
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = el.scrollHeight + 'px'
+}
+
 function Block({
   block, depth, onChange, onDelete, onDuplicate, onAddChild,
   onDragStart, onDragEnd, childDropIndicator, dragInfo, inputRef, showDivider,
@@ -89,10 +103,23 @@ function Block({
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [rawTitle, setRawTitle] = useState('')
   const longPressTimer = useRef(null)
+  const simpleTextareaRef = useRef(null)
+  const bodyTextareaRef = useRef(null)
 
   const isSimpleMode = !showDivider && depth === 0
   const hasAttributes = (block.attributes || []).length > 0
   const blockTotal = computeBlockTotal(block.attributes)
+
+  // ─── altura inicial de textareas al montar ────────────────
+  useEffect(() => {
+    autoResize(simpleTextareaRef.current)
+  }, [])
+
+  useEffect(() => {
+    if (expanded) {
+      autoResize(bodyTextareaRef.current)
+    }
+  }, [expanded])
 
   const handleTouchStart = () => {
     longPressTimer.current = setTimeout(() => setShowHandle(true), 500)
@@ -126,14 +153,10 @@ function Block({
     }
     const { cleanTitle, attrs } = parseInlineAttributes(rawTitle)
     if (attrs.length === 0) {
-      onChange({ ...block, title: rawTitle.trim() })
+      onChange({ ...block, title: rawTitle.trim(), attributes: [] })
       return
     }
-    const existingAttrs = (block.attributes || []).filter(a =>
-      !attrs.some(na => na.label === a.label)
-    )
-    const combined = sortAttributes([...existingAttrs, ...attrs]).slice(0, 3)
-    onChange({ ...block, title: cleanTitle, attributes: combined })
+    onChange({ ...block, title: cleanTitle, attributes: attrs.slice(0, 3) })
   }
 
   const handleTitleKeyDown = (e) => {
@@ -211,12 +234,12 @@ function Block({
         ))}
         {blockTotal?.hasCalc && (
           <span style={{ color: 'var(--color-text)', fontSize: '14px', fontVariantNumeric: 'tabular-nums' }}>
-            {blockTotal.pricePerUnit}{blockTotal.currency}/ud = {blockTotal.total}{blockTotal.currency}
+            {formatMonetary(blockTotal.pricePerUnit)}{blockTotal.currency}/ud = {formatMonetary(blockTotal.total)}{blockTotal.currency}
           </span>
         )}
         {!blockTotal?.hasCalc && monetaryAttr && (
           <span style={{ color: 'var(--color-text)', fontSize: '14px', fontVariantNumeric: 'tabular-nums' }}>
-            {monetaryAttr.value}{monetaryAttr.label}
+            {formatMonetary(monetaryAttr.value)}{monetaryAttr.label}
           </span>
         )}
       </div>
@@ -228,16 +251,25 @@ function Block({
     return (
       <div data-block-id={block.id} data-depth={depth}>
         <textarea
-          ref={inputRef}
+          ref={(el) => {
+            simpleTextareaRef.current = el
+            if (typeof inputRef === 'function') inputRef(el)
+            else if (inputRef) inputRef.current = el
+          }}
           value={block.body}
           onChange={e => {
             onChange({ ...block, body: e.target.value })
-            // auto-resize
-            e.target.style.height = 'auto'
-            e.target.style.height = e.target.scrollHeight + 'px'
+            autoResize(e.target)
+          }}
+          onKeyDown={e => {
+            // Enter con tokens @ convierte a modo lista inmediatamente
+            if (e.key === 'Enter' && hasInlineTokens(e.target.value) && onConvertToStructured) {
+              e.preventDefault()
+              onConvertToStructured(block, e.target.value)
+            }
+            // Enter sin tokens @ — comportamiento normal (salto de línea)
           }}
           onBlur={e => {
-            // si el usuario escribió tokens @, convertir a modo lista
             if (hasInlineTokens(e.target.value) && onConvertToStructured) {
               onConvertToStructured(block, e.target.value)
             }
@@ -468,8 +500,12 @@ function Block({
 
           {/* campo de texto */}
           <textarea
+            ref={bodyTextareaRef}
             value={block.body}
-            onChange={e => onChange({ ...block, body: e.target.value })}
+            onChange={e => {
+              onChange({ ...block, body: e.target.value })
+              autoResize(e.target)
+            }}
             placeholder="Escribe algo..."
             rows={1}
             style={{
@@ -477,11 +513,8 @@ function Block({
               fontFamily: 'var(--font-main)', fontSize: '14px',
               color: 'var(--color-text)', resize: 'none', lineHeight: '1.5',
               background: 'rgba(0,0,0,0.04)', borderRadius: '4px',
-              padding: '8px 10px', marginBottom: '10px', boxSizing: 'border-box'
-            }}
-            onInput={e => {
-              e.target.style.height = 'auto'
-              e.target.style.height = e.target.scrollHeight + 'px'
+              padding: '8px 10px', marginBottom: '10px', boxSizing: 'border-box',
+              overflow: 'hidden'
             }}
           />
 
@@ -519,7 +552,7 @@ function Block({
                 style={{
                   background: 'none', border: 'none', cursor: 'pointer',
                   color: 'var(--color-text-light)', fontSize: '14px',
-                  padding: '6px 0', marginLeft: '8px'
+                  padding: '6px 0', marginLeft: '36px'
                 }}
               >+ Nuevo</button>
             </div>
