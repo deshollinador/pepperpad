@@ -1,17 +1,31 @@
-Quiero que cuando estén desplegados todos los bloques, si pincho fuera, en el fondo, se plieguen todos.
+El subtotal está un poco más a la derecha que el resto. 
 
-Quiero que trabajemos ahora en el total.
+El bloque del total debería ser más notorio.
 
-El total tendría un chevron, aunque distinto a los bloques de las listas. Esta vez estaría en el lado derecho del total y la punta de la flecha, en vez de apuntar hacia la derecha apuntaría hacia abajo. Por defecto estaría oculto
+Quiero hacer la prueba de eliminar los chevrons. Me gustaría que solo pinchando el bloque se expanda, lo mismo que el total. Me gustaría que si se pincha en el texto (solo el texto, no la parte en blanco) se convierta en editable, como ahora. Si se pincha en el resto del bloque si se desplegaría. Qué piensas? Es posible? 
 
-Si se despliega aparecería un campo para escribir y el cursos parpadearía en ese campo. Entonces es cuando podría escribir: "IVA @21%" si doy a enter o al botón más, com en los bloque se añadiría ese elemnto y afectaría el total, viéndose algo así como:
+Cuando es muy largo el texto del bloque y colisiona con los atributos, se oculta. Creo que debería crearse un segundo renglón. No sé si también establecer un máximo de caracteres. Si es muy descriptivo se debería usar las notas interiores.
 
-Subtotal: xxx,xx$
-IVA: 21%
-Total: xxx,xx$ (sumándole el 21%)
+¿Es posible que en la página principal se actualice en la primera posición (bajo las notas fijadas que aún no hemos trabajado) la última nota editada? No abierta, editada. (¿Debería ser la editada?).
 
-Se podría agregar más campos, por si el cliente quiere agregar un descuento o lo que sea. Si se pliega se seguiría mostrando el total. 
+Si se escribe "@21%IVA" no debería parsearse, como "@6personas"? Actualmente lo convierte en "%IVA dividido 21 (y divide como si fueran personas). Lo mismo con "Descuento".
 
+Al pinchar en la parte inferior del total, que es un campo de texto, la pantalla no debería moverse. Actualmente se acomoda arriba y cambia de golpe la vista.
 
-Qué te parece? Quiero que este sistema parezca invisible a ojos de alguien que no necesite esta función
+Quiero que alguien pueda escribir: Patata @300€ (Sse convertiría en modo lista). Luego agrego otro bloque: ajo 100€ (ya se muestra el total). Luego agrego otro: arroz 240€. Si en otro agrego "@6personas" y doy "enter" debería aparecer en el total. Si añado otro bloque: @21%IVA, debería afectarle también al total. Sería una manera directa de afectar al total
+--------
+
+Te agrego mi feedback a esto que has creado y te agrego algunos apuntes más:
+
+Cuando alquien parsee el título ya debería convertirse todo en lista. Quiero que se muestren los atributos del título como si fueran no editables. Quizás sí deberían tener un chevron. "+atributos" ensucia la vista, quizás alguien nunca lo utilice.
+
+He creado bloques: Estrofa @8compases y Preestribillo @8compases. No están sumando.
+
+Edité un archivo anterior y no tomó la primera posición
+
+Qué piensas de mostar la línea del IVA (o lo que haya decidido el usuario con porcentaje así: IVA (21%)            5,00€?
+
+El total de la parte superior no debería ser igual que el inferior?
+
+crees que ud, unidad, unidades puedan ser sinónimos de "uds" para parsear? Se te ocurre alguno más?
 

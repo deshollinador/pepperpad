@@ -1,50 +1,46 @@
 // src/components/NoteDetail.jsx
 import { useState, useRef, useEffect, useCallback } from 'react'
 import Block from './Block'
+import {
+  MONETARY, isMonetary, formatMonetary,
+  computeSubtotal, computeUnitTotals
+} from '../utils/totals'
 
-const MONETARY = ['€', '$', '£']
-const isMonetary = (label) => MONETARY.includes(label)
-
-const formatMonetary = (value) => {
-  const num = parseFloat(value)
-  if (isNaN(num)) return value
-  return num.toFixed(2).replace('.', ',')
+// ─── atributos del título ─────────────────────────────────────
+const parseTitleAttributes = (raw) => {
+  const tokenRegex = /(?:^|(?<=\s))[@=]\s*(-?\d+\.?\d*(?:\/\d+\.?\d*)?)\s*([a-zA-Z%$€£°²³]*)/g
+  const attrs = []
+  let match
+  while ((match = tokenRegex.exec(raw)) !== null) {
+    const value = match[1]
+    const label = match[2].toLowerCase()
+    attrs.push({ id: Date.now().toString() + Math.random(), value, label })
+  }
+  const cleanTitle = raw
+    .replace(/(?:^|(?<=\s))[@=]\s*-?\d+\.?\d*(?:\/\d+\.?\d*)?\s*[a-zA-Z%$€£°²³]*/g, '')
+    .trim()
+  return { cleanTitle, attrs }
 }
 
-// ─── subtotal de bloques ──────────────────────────────────────
-const computeSubtotal = (blocks) => {
-  let total = 0
-  let currency = null
-  for (const block of blocks) {
-    const attrs = block.attributes || []
-    const monetaryAttr = attrs.find(a => isMonetary(a.label))
-    if (!monetaryAttr) continue
-    const udsAttr = attrs.find(a => a.label === 'uds' || a.label === 'u')
-    if (attrs.length === 2 && udsAttr) {
-      const qty = parseFloat(udsAttr.value)
-      const price = parseFloat(monetaryAttr.value)
-      if (!isNaN(qty) && !isNaN(price)) { total += qty * price; currency = monetaryAttr.label }
-    } else {
-      const val = parseFloat(monetaryAttr.value)
-      if (!isNaN(val)) { total += val; currency = monetaryAttr.label }
-    }
-  }
-  return currency ? { total: Math.round(total * 100) / 100, currency } : null
+const reconstructRawTitleNote = (title, attributes) => {
+  if (!attributes || attributes.length === 0) return title
+  const tokens = attributes.map(a => `@${a.value}${a.label}`).join(' ')
+  return `${title} ${tokens}`.trim()
 }
 
 // ─── parser de modificadores ──────────────────────────────────
 const parseModifier = (raw) => {
-  const tokenMatch = raw.match(/[@=]\s*(-?\d+\.?\d*)\s*([a-zA-Z%$€£°\/²³]*)/)
+  const tokenMatch = raw.match(/[@=]\s*(-?\d+\.?\d*)\s*([%$€£]?)([a-zA-Z°\/²³]*)/)
   if (!tokenMatch) return null
   const value = parseFloat(tokenMatch[1])
-  const unitRaw = tokenMatch[2]
-  const unit = unitRaw.toLowerCase()
-  const labelBefore = raw.replace(/[@=]\s*-?\d+\.?\d*\s*[a-zA-Z%$€£°\/²³]*/g, '').trim()
-  const rawLabel = labelBefore || unitRaw || 'Modificador'
+  const symbol = tokenMatch[2]
+  const wordAfter = tokenMatch[3]
+  const labelBefore = raw.replace(/[@=]\s*-?\d+\.?\d*\s*[%$€£]?[a-zA-Z°\/²³]*/g, '').trim()
+  const rawLabel = labelBefore || wordAfter || symbol || 'Modificador'
   const label = rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1)
-  if (unit === '%') return { label, type: 'percent', value }
-  if (isMonetary(unit)) return { label, type: 'fixed', value, currency: unit }
-  if (!isNaN(value) && value !== 0) return { label, type: 'divide', value, unit }
+  if (symbol === '%') return { label, type: 'percent', value }
+  if (['€', '$', '£'].includes(symbol)) return { label, type: 'fixed', value, currency: symbol }
+  if (!isNaN(value) && value !== 0) return { label, type: 'divide', value, unit: wordAfter }
   return null
 }
 
@@ -90,34 +86,26 @@ const stepToRaw = (step) => {
   if (step.type === 'percent') return `${step.label} @${step.value}%`
   if (step.type === 'fixed') return `${step.label} @${step.value}${step.currency}`
   if (step.type === 'divide') {
-    // si la label ES la unidad (ej. "@6personas" → label:"personas", unit:"personas")
-    // no repetir: "personas @6personas" → "personas @6"
     const labelIsUnit = step.label.toLowerCase() === step.unit.toLowerCase()
     return labelIsUnit ? `${step.label} @${step.value}` : `${step.label} @${step.value}${step.unit}`
   }
   return step.label
 }
 
-// ─── ancho fijo para la columna de números ────────────────────
-// Todas las filas (subtotal, modificadores, total) usan este paddingRight
-// para que los números queden alineados en la misma columna derecha.
 const NUM_COL_WIDTH = '90px'
-const NUM_COL_PR = '0px' // padding-right del contenedor raíz (el padre ya tiene el margen)
 
-// ─── fila de modificador ─────────────────────────────────────
+// ─── fila de modificador ──────────────────────────────────────
 function ModRow({ step, isDragging, isDragOver, isEditing, editingRaw, onEditingRawChange,
   onStartEdit, onCommitEdit, onCancelEdit, onDelete, onDragStart, onDragOver, onDrop, onDragEnd, currency, numColWidth }) {
   const [hovered, setHovered] = useState(false)
 
-  // parámetro gris: "21%", "-10%", "÷6"
   const paramLabel = () => {
-    if (step.type === 'percent') return `${step.value > 0 ? '+' : ''}${step.value}%`
-    if (step.type === 'fixed') return `${step.value >= 0 ? '+' : ''}${step.value}${step.currency}`
+    if (step.type === 'percent') return `(${step.value > 0 ? '+' : ''}${step.value}%)`
+    if (step.type === 'fixed') return `(${step.value >= 0 ? '+' : ''}${step.value}${step.currency})`
     if (step.type === 'divide') return `÷${step.value}`
     return ''
   }
 
-  // resultado negro: "+14,93$", "-7,90$", "18,64$"
   const resultLabel = () => {
     if (step.type === 'percent') return `${step.delta >= 0 ? '+' : ''}${formatMonetary(step.delta)}${step.currency}`
     if (step.type === 'fixed') return `${step.delta >= 0 ? '+' : ''}${formatMonetary(step.delta)}${step.currency}`
@@ -137,23 +125,16 @@ function ModRow({ step, isDragging, isDragOver, isEditing, editingRaw, onEditing
       style={{
         display: 'flex', alignItems: 'center', gap: '6px',
         paddingTop: '6px', paddingBottom: '6px', paddingLeft: '36px',
-        fontSize: '14px',
-        opacity: isDragging ? 0.4 : 1,
+        fontSize: '14px', opacity: isDragging ? 0.4 : 1,
         borderTop: isDragOver ? '2px solid var(--color-text)' : '2px solid transparent',
         transition: 'opacity 0.15s', cursor: 'default'
       }}
     >
-      {/* handle — visible solo en hover */}
-      <span style={{
-        color: 'var(--color-text-light)', fontSize: '14px', cursor: 'grab',
-        flexShrink: 0, userSelect: 'none', lineHeight: 1,
-        opacity: hovered ? 0.5 : 0, transition: 'opacity 0.15s', width: '14px'
-      }}>⠿</span>
+      <span style={{ color: 'var(--color-text-light)', fontSize: '14px', cursor: 'grab', flexShrink: 0, userSelect: 'none', lineHeight: 1, opacity: hovered ? 0.5 : 0, transition: 'opacity 0.15s', width: '14px' }}>⠿</span>
 
       {isEditing ? (
         <input
-          autoFocus
-          value={editingRaw}
+          autoFocus value={editingRaw}
           onChange={e => onEditingRawChange(e.target.value)}
           onBlur={onCommitEdit}
           onKeyDown={e => { if (e.key === 'Enter') onCommitEdit(); if (e.key === 'Escape') onCancelEdit() }}
@@ -162,19 +143,13 @@ function ModRow({ step, isDragging, isDragOver, isEditing, editingRaw, onEditing
         />
       ) : (
         <>
-          {/* etiqueta — flex, clickable para editar */}
           <span
             onClick={e => { e.stopPropagation(); onStartEdit(step) }}
             style={{ flex: 1, color: 'var(--color-text-light)', cursor: 'text', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-          >{step.label || '—'}</span>
-
-          {/* parámetro gris — ancho fijo */}
-          <span
-            onClick={e => { e.stopPropagation(); onStartEdit(step) }}
-            style={{ color: 'var(--color-text-light)', fontSize: '14px', fontVariantNumeric: 'tabular-nums', cursor: 'text', flexShrink: 0, width: '44px', textAlign: 'right' }}
-          >{paramLabel()}</span>
-
-          {/* resultado negro — ancho fijo, alineado con subtotal/total */}
+          >
+            {step.label || '—'}
+            {paramLabel() && <span style={{ marginLeft: '4px', opacity: 0.7 }}>{paramLabel()}</span>}
+          </span>
           <span
             onClick={e => { e.stopPropagation(); onStartEdit(step) }}
             style={{ color: 'var(--color-text)', fontSize: '14px', fontVariantNumeric: 'tabular-nums', cursor: 'text', flexShrink: 0, width: numColWidth, textAlign: 'right' }}
@@ -201,16 +176,11 @@ function ModAddRow({ modInput, setModInput, addModifier, modInputRef, hasItems }
     if (e.key === 'Escape') { setModInput(''); setOpen(false) }
   }
 
-  useEffect(() => {
-    if (open && modInputRef.current) modInputRef.current.focus()
-  }, [open])
+  useEffect(() => { if (open && modInputRef.current) modInputRef.current.focus() }, [open])
 
   if (!open) {
     return (
-      <div
-        onClick={handleOpen}
-        style={{ display: 'flex', alignItems: 'center', paddingLeft: '50px', paddingTop: '8px', paddingBottom: '4px', cursor: 'pointer', color: 'var(--color-text-light)', fontSize: '14px', opacity: 0.4, userSelect: 'none' }}
-      >+</div>
+      <div onClick={handleOpen} style={{ display: 'flex', alignItems: 'center', paddingLeft: '50px', paddingTop: '8px', paddingBottom: '4px', cursor: 'pointer', color: 'var(--color-text-light)', fontSize: '14px', opacity: 0.4, userSelect: 'none' }}>+</div>
     )
   }
 
@@ -218,8 +188,7 @@ function ModAddRow({ modInput, setModInput, addModifier, modInputRef, hasItems }
     <div style={{ paddingLeft: '50px', paddingTop: '8px', paddingBottom: '4px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <input
-          ref={modInputRef}
-          type="text" value={modInput}
+          ref={modInputRef} type="text" value={modInput}
           onChange={e => setModInput(e.target.value)}
           onKeyDown={handleKeyDown}
           onClick={e => e.stopPropagation()}
@@ -232,6 +201,77 @@ function ModAddRow({ modInput, setModInput, addModifier, modInputRef, hasItems }
       <div style={{ fontSize: '12px', color: 'var(--color-text-light)', opacity: 0.5, marginTop: '4px', lineHeight: 1.4 }}>
         @21% · @-10% · @-5€ · personas @6
       </div>
+    </div>
+  )
+}
+
+// ─── atributos del título (colapsables) ───────────────────────
+function TitleAttributes({ attributes, onUpdate, onAdd, onDelete, expanded, setExpanded }) {
+  const [editingId, setEditingId] = useState(null)
+
+  const updateAttr = (id, field, raw) => {
+    let value = raw
+    if (field === 'value') value = raw.replace(/[^0-9./\-]/g, '')
+    if (field === 'label') value = raw.replace(/[^a-zA-Z%$€£°²³]/g, '').toLowerCase()
+    onUpdate(attributes.map(a => a.id === id ? { ...a, [field]: value } : a))
+  }
+
+  const commitEdit = () => setEditingId(null)
+
+  if (attributes.length === 0 && !expanded) return null
+
+  const collapsedLine = attributes.map(a => `${a.value}${a.label}`).join('  ·  ')
+
+  return (
+    <div style={{ marginBottom: '12px' }}>
+      <div
+        onClick={() => setExpanded(v => !v)}
+        style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', userSelect: 'none', marginBottom: expanded ? '8px' : '0' }}
+      >
+        <span style={{ fontSize: '10px', color: 'var(--color-text-light)', opacity: 0.5, transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', display: 'inline-block', lineHeight: 1 }}>▾</span>
+        {!expanded && (
+          <span style={{ fontSize: '13px', color: 'var(--color-text-light)', letterSpacing: '0.01em' }}>
+            {collapsedLine}
+          </span>
+        )}
+      </div>
+
+      {expanded && (
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+          {attributes.map(attr => (
+            <div key={attr.id} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(0,0,0,0.06)', borderRadius: '20px', padding: '4px 10px', fontSize: '13px' }}>
+              {editingId === attr.id ? (
+                <>
+                  <input
+                    autoFocus value={attr.value}
+                    onChange={e => updateAttr(attr.id, 'value', e.target.value)}
+                    onBlur={commitEdit}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Tab') commitEdit() }}
+                    placeholder="valor"
+                    style={{ width: '40px', border: 'none', outline: 'none', background: 'transparent', fontSize: '13px', fontFamily: 'var(--font-main)' }}
+                  />
+                  <input
+                    value={attr.label}
+                    onChange={e => updateAttr(attr.id, 'label', e.target.value)}
+                    onBlur={commitEdit}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Tab') commitEdit() }}
+                    placeholder="unidad"
+                    style={{ width: '44px', border: 'none', outline: 'none', background: 'transparent', fontSize: '13px', fontFamily: 'var(--font-main)' }}
+                  />
+                </>
+              ) : (
+                <span onClick={() => setEditingId(attr.id)} style={{ cursor: 'pointer', color: 'var(--color-text-light)' }}>
+                  {attr.value}{attr.label}
+                </span>
+              )}
+              <span onClick={() => onDelete(attr.id)} style={{ cursor: 'pointer', color: 'var(--color-text-light)', fontSize: '13px', lineHeight: 1, marginLeft: '2px' }}>×</span>
+            </div>
+          ))}
+          {attributes.length < 3 && (
+            <button onClick={onAdd} style={{ background: 'none', border: '1px dashed var(--color-border)', borderRadius: '20px', padding: '4px 10px', fontSize: '13px', cursor: 'pointer', color: 'var(--color-text-light)', fontFamily: 'var(--font-main)' }}>+ Atributo</button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -254,6 +294,10 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   const [modDragId, setModDragId] = useState(null)
   const [modDragOverId, setModDragOverId] = useState(null)
   const [modExpanded, setModExpanded] = useState((note.modifiers || []).length > 0)
+  const [titleAttributes, setTitleAttributes] = useState(note.titleAttributes || [])
+  const [isEditingNoteTitle, setIsEditingNoteTitle] = useState(false)
+  const [rawNoteTitle, setRawNoteTitle] = useState('')
+  const [titleAttrExpanded, setTitleAttrExpanded] = useState(false)
 
   const modInputRef = useRef(null)
   const subtotalLabelRef = useRef(null)
@@ -271,12 +315,14 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   const allAttributes = blocks.flatMap(b => [...(b.attributes || []), ...(b.children || []).flatMap(c => c.attributes || [])])
 
   const subtotalResult = isStructured ? computeSubtotal(blocks) : null
+  const unitTotals = isStructured ? computeUnitTotals(blocks) : []
   const { steps: modSteps, finalTotal } = subtotalResult
     ? applyModifiers(subtotalResult.total, modifiers, subtotalResult.currency)
     : { steps: [], finalTotal: 0 }
   const noteTotal = subtotalResult
     ? { total: finalTotal, currency: subtotalResult.currency, subtotal: subtotalResult.total }
     : null
+  const hasTotals = noteTotal || unitTotals.length > 0
 
   useEffect(() => { window.scrollTo(0, 0) }, [])
 
@@ -288,10 +334,10 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   }, [])
 
   useEffect(() => {
-    if (!noteTotal) { setTotalVisible(true); return }
+    if (!hasTotals) { setTotalVisible(true); return }
     const t = setTimeout(observeTotalNumber, 50)
     return () => { clearTimeout(t); observerRef.current?.disconnect() }
-  }, [noteTotal, observeTotalNumber])
+  }, [hasTotals, observeTotalNumber])
 
   useEffect(() => {
     if (!note.title && note.blocks.length === 1 && !note.blocks[0].title && !note.blocks[0].body)
@@ -317,26 +363,59 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
     updateFooterHeight()
     window.addEventListener('resize', updateFooterHeight)
     return () => window.removeEventListener('resize', updateFooterHeight)
-  }, [noteTotal, modExpanded, modifiers])
+  }, [hasTotals, modExpanded, modifiers])
+
+  // ── helpers de guardado ──────────────────────────────────────
+  const buildNote = (patch = {}) => ({
+    ...note, title, blocks, modifiers, footerNote, subtotalLabel, titleAttributes,
+    updatedAt: Date.now(), ...patch
+  })
 
   const save = (newBlocks, newTitle = title, extra = {}) => {
     setBlocks(newBlocks)
-    onUpdate({ ...note, title: newTitle, blocks: newBlocks, modifiers, footerNote, subtotalLabel, ...extra })
+    onUpdate(buildNote({ blocks: newBlocks, title: newTitle, ...extra }))
   }
 
-  const saveModifiers = (newModifiers) => {
-    setModifiers(newModifiers)
-    onUpdate({ ...note, title, blocks, modifiers: newModifiers, footerNote, subtotalLabel })
+  const saveAll = (patch = {}) => onUpdate(buildNote(patch))
+  const saveModifiers = (newMods) => { setModifiers(newMods); onUpdate(buildNote({ modifiers: newMods })) }
+  const saveFooterNote = (text) => { setFooterNote(text); onUpdate(buildNote({ footerNote: text })) }
+  const saveSubtotalLabel = (label) => { setSubtotalLabel(label); onUpdate(buildNote({ subtotalLabel: label })) }
+
+  // ── handlers título ──────────────────────────────────────────
+  const handleTitleFocus = () => {
+    setIsEditingNoteTitle(true)
+    setRawNoteTitle(reconstructRawTitleNote(title, titleAttributes))
   }
 
-  const saveFooterNote = (text) => {
-    setFooterNote(text)
-    onUpdate({ ...note, title, blocks, modifiers, footerNote: text, subtotalLabel })
+  const handleTitleBlur = () => {
+    setIsEditingNoteTitle(false)
+    if (!rawNoteTitle.trim()) {
+      setTitle(''); setTitleAttributes([])
+      onUpdate(buildNote({ title: '', titleAttributes: [] })); return
+    }
+    const { cleanTitle, attrs } = parseTitleAttributes(rawNoteTitle)
+    const newAttrs = attrs.slice(0, 3)
+    setTitle(cleanTitle); setTitleAttributes(newAttrs)
+    if (newAttrs.length > 0 && !isStructured) {
+      onUpdate(buildNote({ title: cleanTitle, titleAttributes: newAttrs, isStructured: true }))
+    } else {
+      onUpdate(buildNote({ title: cleanTitle, titleAttributes: newAttrs }))
+    }
   }
 
-  const saveSubtotalLabel = (label) => {
-    setSubtotalLabel(label)
-    onUpdate({ ...note, title, blocks, modifiers, footerNote, subtotalLabel: label })
+  const handleTitleKeyDown = (e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur() } }
+
+  const addTitleAttribute = () => {
+    if (titleAttributes.length >= 3) return
+    const newAttr = { id: Date.now().toString(), value: '', label: '' }
+    const newAttrs = [...titleAttributes, newAttr]
+    setTitleAttributes(newAttrs); saveAll({ titleAttributes: newAttrs })
+  }
+
+  const updateTitleAttributes = (newAttrs) => { setTitleAttributes(newAttrs); saveAll({ titleAttributes: newAttrs }) }
+  const deleteTitleAttribute = (id) => {
+    const newAttrs = titleAttributes.filter(a => a.id !== id)
+    setTitleAttributes(newAttrs); saveAll({ titleAttributes: newAttrs })
   }
 
   const handleContainerClick = () => setMenuOpen(false)
@@ -388,7 +467,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
     const newId = Date.now().toString()
     const newBlocks = [convertedBlock, { id: newId, title: '', body: '', attributes: [], children: [], collapsed: true, order: 1 }]
     setBlocks(newBlocks)
-    onUpdate({ ...note, title, blocks: newBlocks, isStructured: true, modifiers, footerNote, subtotalLabel })
+    onUpdate(buildNote({ blocks: newBlocks, isStructured: true }))
     setNewBlockId(newId)
   }
 
@@ -404,7 +483,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
     const newId = Date.now().toString()
     const newBlocks = [...currentBlocks, { id: newId, title: '', body: '', attributes: [], children: [], collapsed: true, order: currentBlocks.length }]
     setBlocks(newBlocks)
-    onUpdate({ ...note, title, blocks: newBlocks, isStructured: true, modifiers, footerNote, subtotalLabel })
+    onUpdate(buildNote({ blocks: newBlocks, isStructured: true }))
     setNewBlockId(newId)
   }
 
@@ -416,7 +495,6 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   }
 
   const deleteModifier = (id) => saveModifiers(modifiers.filter(m => m.id !== id))
-
   const startEditMod = (step) => { setEditingModId(step.id); setEditingModRaw(stepToRaw(step)) }
 
   const commitEditMod = () => {
@@ -439,7 +517,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
 
   const handleBack = () => {
     const cleaned = blocks.filter(b => !isBlockEmpty(b))
-    onBack({ ...note, title, blocks: cleaned.length > 0 ? cleaned : blocks.slice(0, 1), modifiers, footerNote, subtotalLabel })
+    onBack(buildNote({ blocks: cleaned.length > 0 ? cleaned : blocks.slice(0, 1) }))
   }
 
   const handleDragStart = (block, parentId) => { dragInfo.current = { block, parentId } }
@@ -494,9 +572,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
     return (el) => { blockInputRefs.current[blockId] = el }
   }
 
-  // ─── alineación: todas las filas del total usan el mismo paddingLeft
-  // y la columna de números tiene ancho fijo alineado a la derecha ──────
-  const ROW_PL = '36px'  // alineado con el cuerpo de los bloques
+  const ROW_PL = '36px'
 
   return (
     <div ref={containerRef} onClick={handleContainerClick}>
@@ -517,22 +593,45 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
 
       {/* título */}
       <input
-        type="text" value={title}
-        onChange={e => { setTitle(e.target.value); onUpdate({ ...note, title: e.target.value, blocks, modifiers, footerNote, subtotalLabel }) }}
+        type="text"
+        value={isEditingNoteTitle ? rawNoteTitle : title}
+        onChange={e => isEditingNoteTitle ? setRawNoteTitle(e.target.value) : setTitle(e.target.value)}
+        onFocus={handleTitleFocus}
+        onBlur={handleTitleBlur}
+        onKeyDown={handleTitleKeyDown}
         onClick={e => e.stopPropagation()}
         placeholder="Título"
-        style={{ width: '100%', border: 'none', fontSize: '20px', fontWeight: '600', outline: 'none', fontFamily: 'var(--font-main)', marginBottom: '4px', color: 'var(--color-text)' }}
+        style={{ width: '100%', border: 'none', fontSize: '20px', fontWeight: '600', outline: 'none', fontFamily: 'var(--font-main)', marginBottom: '6px', color: 'var(--color-text)' }}
       />
 
-      {/* total superior — solo cuando el inferior no es visible */}
-      {noteTotal && !totalVisible && (
-        <div style={{ display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, marginTop: '8px', paddingBottom: '12px', borderBottom: '1px solid var(--color-border)', fontSize: '15px', fontWeight: '600', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text)' }}>
-          <span style={{ flex: 1, color: 'var(--color-text-light)', fontWeight: '400', fontSize: '13px' }}>Total</span>
-          <span style={{ width: NUM_COL_WIDTH, textAlign: 'right' }}>{formatMonetary(noteTotal.total)}{noteTotal.currency}</span>
+      {/* atributos del título */}
+      <TitleAttributes
+        attributes={titleAttributes}
+        onUpdate={updateTitleAttributes}
+        onAdd={addTitleAttribute}
+        onDelete={deleteTitleAttribute}
+        expanded={titleAttrExpanded}
+        setExpanded={setTitleAttrExpanded}
+      />
+
+      {/* total superior — mismo número que total final inferior */}
+      {hasTotals && !totalVisible && (
+        <div style={{ display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, marginTop: '4px', paddingBottom: '12px', borderBottom: '1px solid var(--color-border)' }}>
+          <span style={{ flex: 1 }} />
+          {unitTotals.map(ut => (
+            <span key={ut.label} style={{ fontSize: '14px', color: 'var(--color-text-light)', fontVariantNumeric: 'tabular-nums', marginRight: '12px' }}>
+              {ut.total}{ut.label}
+            </span>
+          ))}
+          {noteTotal && (
+            <span style={{ fontSize: '15px', fontWeight: '600', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text)' }}>
+              {formatMonetary(noteTotal.total)}{noteTotal.currency}
+            </span>
+          )}
         </div>
       )}
 
-      {!(noteTotal && !totalVisible) && <div style={{ marginBottom: '16px' }} />}
+      {!(hasTotals && !totalVisible) && <div style={{ marginBottom: '16px' }} />}
 
       {/* bloques */}
       <div ref={blocksRef} onDragOver={handleDragOverContainer} onDrop={handleDropOnContainer} onDragLeave={handleDragLeaveContainer}>
@@ -562,95 +661,97 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
       {/* zona + */}
       <div onClick={e => { e.stopPropagation(); addBlock() }} style={{ minHeight: '60px', cursor: 'text', display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, color: 'var(--color-text-light)', fontSize: '14px', opacity: 0.4, userSelect: 'none' }}>+</div>
 
-      {/* ── total inferior ── */}
-      {noteTotal && (
+      {/* ── totales inferiores ── */}
+      {hasTotals && (
         <div onClick={e => e.stopPropagation()}>
-          <div style={{ borderTop: '1px solid var(--color-border)', marginTop: '8px' }} />
+          <div style={{ borderTop: '2px solid var(--color-text)', marginTop: '16px', opacity: 0.15 }} />
 
-          {/* fila subtotal — clickable para expandir/colapsar */}
-          <div
-            style={{ display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, paddingTop: '12px', paddingBottom: modExpanded ? '4px' : '0', cursor: 'pointer' }}
-            onClick={() => setModExpanded(v => !v)}
-          >
-            {/* etiqueta subtotal editable — solo si hay modificadores Tipo A */}
-            {modExpanded ? (
-              modSteps.some(s => s.type !== 'divide') ? (
-                editingSubtotalLabel ? (
-                  <input
-                    ref={subtotalLabelRef}
-                    value={subtotalLabel}
-                    onChange={e => setSubtotalLabel(e.target.value)}
-                    onBlur={() => { saveSubtotalLabel(subtotalLabel); setEditingSubtotalLabel(false) }}
-                    onKeyDown={e => { if (e.key === 'Enter') { saveSubtotalLabel(subtotalLabel); setEditingSubtotalLabel(false) } }}
-                    onClick={e => e.stopPropagation()}
-                    style={{ flex: 1, border: 'none', outline: 'none', fontFamily: 'var(--font-main)', fontSize: '15px', fontWeight: '600', color: 'var(--color-text)', background: 'transparent' }}
-                  />
-                ) : (
-                  <span onClick={e => { e.stopPropagation(); setEditingSubtotalLabel(true) }} style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: 'var(--color-text)', cursor: 'text' }}>
-                    {subtotalLabel}
-                  </span>
-                )
-              ) : (
-                <span style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: 'var(--color-text)' }}>Total</span>
-              )
-            ) : (
-              <span style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: 'var(--color-text)' }}>
-                {'Total'}
+          {/* totales por unidad no monetaria */}
+          {unitTotals.map(ut => (
+            <div key={ut.label} style={{ display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, paddingTop: '10px' }}>
+              <span style={{ flex: 1, fontSize: '14px', color: 'var(--color-text-light)' }}>Total {ut.label}</span>
+              <span style={{ fontSize: '14px', color: 'var(--color-text-light)', fontVariantNumeric: 'tabular-nums', paddingRight: '26px' }}>
+                {ut.total}{ut.label}
               </span>
-            )}
+            </div>
+          ))}
 
-            <span ref={totalNumberRef} style={{ width: NUM_COL_WIDTH, textAlign: 'right', fontSize: '15px', fontWeight: '600', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text)' }}>
-              {formatMonetary(modExpanded ? subtotalResult.total : noteTotal.total)}{noteTotal.currency}
-            </span>
-            <span style={{ fontSize: '10px', color: 'var(--color-text-light)', opacity: 0.5, transform: modExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', display: 'inline-block', lineHeight: 1, marginLeft: '6px' }}>▾</span>
-          </div>
+          {/* total monetario con panel de modificadores */}
+          {noteTotal && (
+            <>
+              <div
+                style={{ display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, paddingTop: '12px', paddingBottom: modExpanded ? '4px' : '0', cursor: 'pointer' }}
+                onClick={() => setModExpanded(v => !v)}
+              >
+                {modExpanded ? (
+                  modSteps.some(s => s.type !== 'divide') ? (
+                    editingSubtotalLabel ? (
+                      <input
+                        ref={subtotalLabelRef}
+                        value={subtotalLabel}
+                        onChange={e => setSubtotalLabel(e.target.value)}
+                        onBlur={() => { saveSubtotalLabel(subtotalLabel); setEditingSubtotalLabel(false) }}
+                        onKeyDown={e => { if (e.key === 'Enter') { saveSubtotalLabel(subtotalLabel); setEditingSubtotalLabel(false) } }}
+                        onClick={e => e.stopPropagation()}
+                        style={{ flex: 1, border: 'none', outline: 'none', fontFamily: 'var(--font-main)', fontSize: '15px', fontWeight: '600', color: 'var(--color-text)', background: 'transparent' }}
+                      />
+                    ) : (
+                      <span onClick={e => { e.stopPropagation(); setEditingSubtotalLabel(true) }} style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: 'var(--color-text)', cursor: 'text' }}>
+                        {subtotalLabel}
+                      </span>
+                    )
+                  ) : (
+                    <span style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: 'var(--color-text)' }}>Total</span>
+                  )
+                ) : (
+                  <span style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: 'var(--color-text)' }}>Total</span>
+                )}
 
-          {/* panel expandido */}
-          {modExpanded && (
-            <div style={{ paddingBottom: '8px' }}>
+                <span ref={totalNumberRef} style={{ width: NUM_COL_WIDTH, textAlign: 'right', fontSize: '15px', fontWeight: '600', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text)' }}>
+                  {formatMonetary(modExpanded ? subtotalResult.total : noteTotal.total)}{noteTotal.currency}
+                </span>
+                <span style={{ fontSize: '10px', color: 'var(--color-text-light)', opacity: 0.5, transform: modExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', display: 'inline-block', lineHeight: 1, marginLeft: '6px' }}>▾</span>
+              </div>
 
-              {/* modificadores */}
-              {modSteps.map(step => (
-                <ModRow
-                  key={step.id} step={step}
-                  isDragging={modDragId === step.id} isDragOver={modDragOverId === step.id}
-                  isEditing={editingModId === step.id} editingRaw={editingModRaw}
-                  onEditingRawChange={setEditingModRaw}
-                  onStartEdit={startEditMod} onCommitEdit={commitEditMod} onCancelEdit={() => setEditingModId(null)}
-                  onDelete={deleteModifier}
-                  onDragStart={handleModDragStart} onDragOver={handleModDragOver}
-                  onDrop={handleModDrop} onDragEnd={handleModDragEnd}
-                  currency={noteTotal.currency}
-                  numColWidth={NUM_COL_WIDTH}
-                />
-              ))}
-
-              {/* + añadir modificador — bajo los items */}
-              <ModAddRow
-                modInput={modInput} setModInput={setModInput}
-                addModifier={addModifier} modInputRef={modInputRef}
-                hasItems={modSteps.length > 0}
-              />
-
-              {/* total final — solo si hay modificadores que cambian el total */}
-              {modSteps.some(s => s.type !== 'divide') && (
-                <div style={{ display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, paddingTop: '10px', borderTop: '1px solid var(--color-border)', fontSize: '15px', fontWeight: '600', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text)' }}>
-                  <span style={{ flex: 1 }}>Total</span>
-                  <span style={{ width: NUM_COL_WIDTH, textAlign: 'right' }}>{formatMonetary(noteTotal.total)}{noteTotal.currency}</span>
-                  <span style={{ width: '26px' }} />
+              {modExpanded && (
+                <div style={{ paddingBottom: '8px' }}>
+                  {modSteps.map(step => (
+                    <ModRow
+                      key={step.id} step={step}
+                      isDragging={modDragId === step.id} isDragOver={modDragOverId === step.id}
+                      isEditing={editingModId === step.id} editingRaw={editingModRaw}
+                      onEditingRawChange={setEditingModRaw}
+                      onStartEdit={startEditMod} onCommitEdit={commitEditMod} onCancelEdit={() => setEditingModId(null)}
+                      onDelete={deleteModifier}
+                      onDragStart={handleModDragStart} onDragOver={handleModDragOver}
+                      onDrop={handleModDrop} onDragEnd={handleModDragEnd}
+                      currency={noteTotal.currency} numColWidth={NUM_COL_WIDTH}
+                    />
+                  ))}
+                  <ModAddRow modInput={modInput} setModInput={setModInput} addModifier={addModifier} modInputRef={modInputRef} hasItems={modSteps.length > 0} />
+                  {modSteps.some(s => s.type !== 'divide') && (
+                    <div style={{ display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, paddingTop: '10px', borderTop: '1px solid var(--color-border)', fontSize: '15px', fontWeight: '600', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text)' }}>
+                      <span style={{ flex: 1 }}>Total</span>
+                      <span style={{ width: NUM_COL_WIDTH, textAlign: 'right' }}>{formatMonetary(noteTotal.total)}{noteTotal.currency}</span>
+                      <span style={{ width: '26px' }} />
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
+            </>
           )}
+
+          {!noteTotal && unitTotals.length > 0 && <div ref={totalNumberRef} style={{ height: '1px' }} />}
         </div>
       )}
 
-      {/* campo de texto libre — crece hasta el borde de pantalla */}
+      {/* campo de texto libre */}
       <textarea
         ref={footerRef}
         value={footerNote}
         onChange={e => saveFooterNote(e.target.value)}
         onClick={e => e.stopPropagation()}
+        onFocus={e => { e.preventDefault(); e.target.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }}
         placeholder="" rows={2}
         style={{ width: '100%', border: 'none', outline: 'none', fontFamily: 'var(--font-main)', fontSize: '14px', color: 'var(--color-text)', resize: 'none', lineHeight: '1.6', background: 'transparent', marginTop: '32px', boxSizing: 'border-box', overflow: 'hidden', display: 'block' }}
       />

@@ -17,15 +17,18 @@ function NoteList({ notes, onSelectNote, onCreateNote, onDeleteNote, onDuplicate
   }, [])
 
   const getDisplayText = (note) => {
-    if (note.title.trim()) return note.title
+    if (note.title?.trim()) return note.title
     for (const block of note.blocks) {
-      if (block.title.trim()) return block.title
-      if (block.body.trim()) return block.body
+      if (block.title?.trim()) return block.title
+      if (block.body?.trim()) return block.body
     }
     return null
   }
 
-  const filtered = notes.filter(note => {
+  // ordenar por updatedAt descendente (más reciente primero)
+  const sorted = [...notes].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+
+  const filtered = sorted.filter(note => {
     const text = getDisplayText(note) || ''
     return text.toLowerCase().includes(search.toLowerCase())
   })
@@ -96,7 +99,12 @@ function NoteList({ notes, onSelectNote, onCreateNote, onDeleteNote, onDuplicate
               }}
             >
               {displayText ? (
-                <span>{displayText}</span>
+                <span style={{
+                  display: 'block',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                }}>{displayText}</span>
               ) : (
                 <span style={{ color: 'var(--color-text-light)', fontStyle: 'italic' }}>Sin contenido</span>
               )}
@@ -116,7 +124,6 @@ function NoteList({ notes, onSelectNote, onCreateNote, onDeleteNote, onDuplicate
         })}
       </div>
 
-      {/* botón + centrado visualmente */}
       <button
         onClick={onCreateNote}
         style={{

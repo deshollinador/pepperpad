@@ -1,0 +1,11 @@
+Este es feedback muy pequeño, pero te lo paso para que no se me olvide y lo corrijamos pronto:
+
+En la lista de bloques con valores que no son monetarios no está mostrando el valor de cada bloque, sí el total.
+
+Faltaría aplicar el campo de agregar una fórmula. Actualmente el total de valores no monetarios no tiene la opción de mostrar el detalle del total para agregar porcentaje, descuentos, y ahora la fórmula
+
+El valor definido de un bloque padre, que no es la suma de los hijos, no se está mostrando en gris.
+
+el botón de "+ Nuevo", que crea los hijos nuevos debería ir un poco más a la derecha, para que se entienda que hay una jerarquía.´Y debería ir antes del total de los hijos.
+
+El total de los hijos que se muestra debajo, una vez desplegados el bloque padre, no debería incluir el valor el padre (¿o sí?)
