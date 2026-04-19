@@ -1,0 +1,36 @@
+Los atributos que no son monetarios no deberían ir pegados a el valor. Por ejemplo, 8 compases se ve como "8compases".
+
+Crees que el porcentaje cuando es positivo deba tener el "+"? Por ejemplo IVA (+21%)? Yo creo que mejor no, el negativo sí.
+---
+Quiero añadirle un elemento más. Quisiera añadir etiquetas. Me explico. Que al añadir un item para la lista pueda hacer:
+
+Camisa #Marcelo @10€
+Pantalón #Pepe @20€
+Calcetines #Marcelo @5€
+Camiseta #Pepe @5€
+
+Total: 40€
+Marcelo: 15€
+Pepe: 25€
+
+---
+El total de atributos no monetarios aparece en pequeño sobre el subtotal. Crees que es una buen posición para estar?
+
+El subtotal está ligeramente desplazado a la derecha, pierde la línea.
+
+El total superior está más a la derecha que el resto.
+
+El total inferior debe ser más llamativo, quizás más grande.
+
+-----
+
+El botón de nuevo hijo debería ser como el botón de nuevo padre, solo el signo "+", en la misma línea del resto de hijos y una vez que haya hijos creados con solo hacer un clic en el espacio ya crea un nuevo hijo y el cursos parpadea esperando escribir. Quiero que sea igual que el padre, la misma lógica.
+
+En la página principal no está apareciendo en primera posición la última nota editada
+
+
+
+
+
+
+Quiero continuar esta charla en otro chat. Quiero que me des toda la información que necesites para continuar

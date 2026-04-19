@@ -2,12 +2,11 @@
 import { useState, useEffect } from 'react'
 import NoteList from './components/NoteList'
 import NoteDetail from './components/NoteDetail'
-import { initialNotes } from './data/initialData'
 
 function App() {
   const [notes, setNotes] = useState(() => {
     const saved = localStorage.getItem('pepperpad-notes')
-    return saved ? JSON.parse(saved) : initialNotes
+    return saved ? JSON.parse(saved) : []
   })
   const [selectedNote, setSelectedNote] = useState(null)
 
@@ -18,11 +17,10 @@ function App() {
   const createNote = () => {
     const newNote = {
       id: Date.now().toString(),
-      templateType: 'simple',
       isStructured: false,
       title: '',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
       blocks: [
         {
           id: Date.now().toString() + '-block',
@@ -35,18 +33,18 @@ function App() {
         }
       ]
     }
-    setNotes([newNote, ...notes])
+    setNotes(prev => [newNote, ...prev])
     setSelectedNote(newNote)
   }
 
   const updateNote = (updatedNote) => {
-    const updated = { ...updatedNote, updatedAt: new Date().toISOString() }
-    setNotes(notes.map(n => n.id === updated.id ? updated : n))
+    const updated = { ...updatedNote, updatedAt: Date.now() }
+    setNotes(prev => prev.map(n => n.id === updated.id ? updated : n))
     setSelectedNote(updated)
   }
 
   const deleteNote = (noteId) => {
-    setNotes(notes.filter(n => n.id !== noteId))
+    setNotes(prev => prev.filter(n => n.id !== noteId))
     setSelectedNote(null)
   }
 
@@ -55,14 +53,13 @@ function App() {
       ...note,
       id: Date.now().toString(),
       title: note.title ? note.title + ' (copia)' : '',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      createdAt: Date.now(),
+      updatedAt: Date.now()
     }
-    setNotes([duplicated, ...notes])
+    setNotes(prev => [duplicated, ...prev])
   }
 
   const handleBack = (note) => {
-    // eliminar bloques vacíos antes de guardar
     const isBlockEmpty = (b) =>
       !b.title?.trim() && !b.body?.trim() && (b.attributes || []).length === 0
 
@@ -70,7 +67,6 @@ function App() {
     const finalBlocks = cleanedBlocks.length > 0 ? cleanedBlocks : note.blocks.slice(0, 1)
     const finalNote = { ...note, blocks: finalBlocks }
 
-    // si la nota entera está vacía, eliminarla
     const isEmpty = !finalNote.title.trim() &&
       finalNote.blocks.every(b =>
         !b.title?.trim() && !b.body?.trim() &&
@@ -80,7 +76,7 @@ function App() {
     if (isEmpty) {
       deleteNote(finalNote.id)
     } else {
-      setNotes(notes.map(n => n.id === finalNote.id ? { ...finalNote, updatedAt: new Date().toISOString() } : n))
+      setNotes(prev => prev.map(n => n.id === finalNote.id ? { ...finalNote, updatedAt: Date.now() } : n))
       setSelectedNote(null)
     }
   }

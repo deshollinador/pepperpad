@@ -1,8 +1,8 @@
 // src/components/Block.jsx
 import { useState, useRef, useEffect } from 'react'
 import {
-  MONETARY, isMonetary, isUds, formatMonetary,
-  computeChildrenSubtotal, computeChildrenUnitTotals
+  MONETARY, isMonetary, isUds, formatMonetary, normalizeDecimal,
+  computeChildrenSubtotal, computeChildrenUnitTotals, parseBlockTags
 } from '../utils/totals'
 
 const sortAttributes = (attrs) => {
@@ -17,42 +17,43 @@ const computeBlockTotal = (attributes) => {
   const udsAttr = attrs.find(a => isUds(a.label))
 
   if (attrs.length === 2 && udsAttr && monetaryAttrs.length === 1) {
-    const qty = parseFloat(udsAttr.value)
-    const price = parseFloat(monetaryAttrs[0].value)
+    const qty = parseFloat(normalizeDecimal(udsAttr.value))
+    const price = parseFloat(normalizeDecimal(monetaryAttrs[0].value))
     if (!isNaN(qty) && !isNaN(price)) {
       return { hasCalc: true, total: Math.round(qty * price * 100) / 100, currency: monetaryAttrs[0].label, pricePerUnit: price, qty }
     }
   }
 
   if (monetaryAttrs.length === 1) {
-    const val = parseFloat(monetaryAttrs[0].value)
+    const val = parseFloat(normalizeDecimal(monetaryAttrs[0].value))
     if (!isNaN(val)) return { hasCalc: false, total: val, currency: monetaryAttrs[0].label }
   }
 
   return null
 }
 
-const reconstructRawTitle = (title, attributes) => {
-  if (!attributes || attributes.length === 0) return title
-  const tokens = attributes.map(a => `@${a.value}${a.label}`).join(' ')
-  return `${title} ${tokens}`.trim()
+// Reconstruye el raw del título incluyendo tags y atributos
+const reconstructRawTitle = (title, attributes, tags) => {
+  const tagStr = (tags || []).map(t => `#${t}`).join(' ')
+  const attrStr = (attributes || []).map(a => `@${a.value}${a.label}`).join(' ')
+  return [title, tagStr, attrStr].filter(Boolean).join(' ').trim()
 }
 
 const parseInlineAttributes = (raw) => {
-  const tokenRegex = /(?:^|(?<=\s))[@=]\s*(-?\d+\.?\d*)\s*([a-zA-Z%$€£°\/²³]*)/g
+  const tokenRegex = /(?:^|(?<=\s))[@=]\s*(-?\d+[.,]?\d*)\s*([a-zA-Z%$€£°\/²³]*)/g
   const attrs = []
   let match
   while ((match = tokenRegex.exec(raw)) !== null) {
-    const value = match[1]
+    const value = normalizeDecimal(match[1])
     const label = match[2].toLowerCase()
     attrs.push({ id: Date.now().toString() + Math.random(), value, label, sum: isMonetary(label) })
   }
-  const cleanTitle = raw.replace(/(?:^|(?<=\s))[@=]\s*-?\d+\.?\d*\s*[a-zA-Z%$€£°\/²³]*/g, '').trim()
+  const cleanTitle = raw.replace(/(?:^|(?<=\s))[@=]\s*-?\d+[.,]?\d*\s*[a-zA-Z%$€£°\/²³]*/g, '').trim()
   return { cleanTitle, attrs: sortAttributes(attrs) }
 }
 
 const hasInlineTokens = (text) =>
-  /(?:^|(?<=\s))[@=]\s*-?\d+\.?\d*\s*[a-zA-Z%$€£°\/²³]*/.test(text)
+  /(?:^|(?<=\s))[@=]\s*-?\d+[.,]?\d*\s*[a-zA-Z%$€£°\/²³]*/.test(text)
 
 const autoResize = (el) => {
   if (!el) return
@@ -60,49 +61,38 @@ const autoResize = (el) => {
   el.style.height = el.scrollHeight + 'px'
 }
 
-// ─── resumen de totales de hijos para mostrar en fila colapsada ──
-// Devuelve array de strings como "12compases", "6,00€", "8 → 12compases"
-const buildChildrenSummary = (block) => {
+// ─── resumen de totales de hijos ─────────────────────────────
+const buildChildrenTotals = (block) => {
   const children = block.children || []
-  if (children.length === 0) return []
+  if (children.length === 0) return { monetary: null, units: [] }
 
-  const summary = []
-
-  // totales monetarios de hijos
+  let monetary = null
   const childMonetary = computeChildrenSubtotal(children)
   if (childMonetary) {
-    // valor propio monetario del padre
     const ownTotal = computeBlockTotal(block.attributes)
-    const ownMonetary = ownTotal && ownTotal.currency === childMonetary.currency ? ownTotal.total : null
+    const ownVal = ownTotal && ownTotal.currency === childMonetary.currency ? ownTotal.total : null
     const childStr = `${formatMonetary(childMonetary.total)}${childMonetary.currency}`
-    if (ownMonetary !== null && Math.round(ownMonetary * 100) !== Math.round(childMonetary.total * 100)) {
-      summary.push(`${formatMonetary(ownMonetary)} → ${childStr}`)
-    } else {
-      summary.push(childStr)
-    }
+    const differs = ownVal !== null && Math.round(ownVal * 100) !== Math.round(childMonetary.total * 100)
+    monetary = { childStr, ownStr: differs ? `${formatMonetary(ownVal)}${childMonetary.currency}` : null }
   }
 
-  // totales por unidad no monetaria de hijos
   const childUnits = computeChildrenUnitTotals(children)
-  for (const ut of childUnits) {
-    // valor propio del padre para esa unidad
+  const units = childUnits.map(ut => {
     const ownAttr = (block.attributes || []).find(a => (a.label || '').toLowerCase() === ut.label)
-    const ownVal = ownAttr ? parseFloat(ownAttr.value) : null
-    const childStr = `${ut.total}${ut.label}`
-    if (ownVal !== null && !isNaN(ownVal) && Math.round(ownVal * 100) !== Math.round(ut.total * 100)) {
-      summary.push(`${ownVal} → ${childStr}`)
-    } else {
-      summary.push(childStr)
-    }
-  }
+    const ownVal = ownAttr ? parseFloat(normalizeDecimal(ownAttr.value)) : null
+    const childStr = `${ut.total} ${ut.label}`
+    const differs = ownVal !== null && !isNaN(ownVal) && Math.round(ownVal * 100) !== Math.round(ut.total * 100)
+    return { label: ut.label, childStr, ownStr: differs ? `${ownVal} ${ut.label}` : null }
+  })
 
-  return summary
+  return { monetary, units }
 }
 
 function Block({
   block, depth, onChange, onDelete, onDuplicate, onAddChild,
   onDragStart, onDragEnd, childDropIndicator, dragInfo, inputRef, showDivider,
-  allAttributes, onConvertToStructured, collapseAll
+  allAttributes, onConvertToStructured, collapseAll,
+  newChildId, onNewChildRef
 }) {
   const [expanded, setExpanded] = useState(!block.collapsed)
   const [showHandle, setShowHandle] = useState(false)
@@ -115,15 +105,21 @@ function Block({
   const bodyTextareaRef = useRef(null)
 
   const isSimpleMode = !showDivider && depth === 0
-  const hasAttributes = (block.attributes || []).length > 0
   const hasChildren = (block.children || []).length > 0
   const blockTotal = computeBlockTotal(block.attributes)
-  const childrenSummary = depth === 0 ? buildChildrenSummary(block) : []
-  const showChildrenSummary = childrenSummary.length > 0
+  const childrenTotals = depth === 0 ? buildChildrenTotals(block) : { monetary: null, units: [] }
+  const hasChildTotals = childrenTotals.monetary !== null || childrenTotals.units.length > 0
+  const tags = block.tags || []
 
   useEffect(() => { if (collapseAll) setExpanded(false) }, [collapseAll])
   useEffect(() => { autoResize(simpleTextareaRef.current) }, [])
   useEffect(() => { if (expanded) autoResize(bodyTextareaRef.current) }, [expanded])
+
+  useEffect(() => {
+    if (newChildId && (block.children || []).some(c => c.id === newChildId)) {
+      setExpanded(true)
+    }
+  }, [newChildId, block.children])
 
   const handleTouchStart = () => { longPressTimer.current = setTimeout(() => setShowHandle(true), 500) }
   const handleTouchEnd = () => { clearTimeout(longPressTimer.current) }
@@ -136,15 +132,23 @@ function Block({
 
   const handleTitleFocus = () => {
     setIsEditingTitle(true)
-    setRawTitle(reconstructRawTitle(block.title, block.attributes))
+    setRawTitle(reconstructRawTitle(block.title, block.attributes, block.tags))
   }
 
   const handleTitleBlur = () => {
     setIsEditingTitle(false)
-    if (!rawTitle.trim()) { onChange({ ...block, title: '', attributes: [] }); return }
-    const { cleanTitle, attrs } = parseInlineAttributes(rawTitle)
-    if (attrs.length === 0) { onChange({ ...block, title: rawTitle.trim(), attributes: [] }); return }
-    onChange({ ...block, title: cleanTitle, attributes: attrs.slice(0, 3) })
+    if (!rawTitle.trim()) { onChange({ ...block, title: '', attributes: [], tags: [] }); return }
+
+    // 1. extraer tags #
+    const { cleanTitle: afterTags, tags: newTags } = parseBlockTags(rawTitle)
+    // 2. extraer atributos @ del resto
+    const { cleanTitle, attrs } = parseInlineAttributes(afterTags)
+
+    if (attrs.length === 0 && newTags.length === 0) {
+      onChange({ ...block, title: rawTitle.trim(), attributes: [], tags: [] })
+      return
+    }
+    onChange({ ...block, title: cleanTitle, attributes: attrs.slice(0, 3), tags: newTags.slice(0, 1) })
   }
 
   const handleTitleKeyDown = (e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur() } }
@@ -159,8 +163,8 @@ function Block({
   const updateAttribute = (id, field, raw) => {
     let value = raw
     if (field === 'value') {
-      value = raw.replace(/[^0-9.\-]/g, '')
-      const parts = value.split('.')
+      value = raw.replace(/[^0-9.,\-]/g, '')
+      const parts = value.replace(',', '.').split('.')
       if (parts.length > 2) value = parts[0] + '.' + parts.slice(1).join('')
       if (value.indexOf('-') > 0) value = value.replace(/-/g, '')
     }
@@ -186,30 +190,43 @@ function Block({
     return [...new Set(used)]
   }
 
-  // ─── fila de atributos colapsada ──────────────────────────────
-  // Si hay hijos: muestra el resumen de hijos (con → si difiere del valor propio)
-  // Si no hay hijos: muestra los atributos propios del bloque
+  // ─── fila derecha colapsada ───────────────────────────────────
   const renderCollapsedRight = () => {
-    if (showChildrenSummary) {
+    if (hasChildTotals) {
       return (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-          {childrenSummary.map((s, i) => (
-            <span key={i} style={{ fontSize: '14px', color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>{s}</span>
+          {childrenTotals.units.map(ut => (
+            <span key={ut.label} style={{ fontSize: '14px', fontVariantNumeric: 'tabular-nums' }}>
+              {ut.ownStr && <span style={{ color: 'var(--color-text-light)', marginRight: '2px' }}>{ut.ownStr} →</span>}
+              <span style={{ color: 'var(--color-text-light)' }}>{ut.childStr}</span>
+            </span>
           ))}
+          {childrenTotals.monetary && (
+            <span style={{ fontSize: '14px', fontVariantNumeric: 'tabular-nums' }}>
+              {childrenTotals.monetary.ownStr && <span style={{ color: 'var(--color-text-light)', marginRight: '2px' }}>{childrenTotals.monetary.ownStr} →</span>}
+              <span style={{ color: 'var(--color-text)' }}>{childrenTotals.monetary.childStr}</span>
+            </span>
+          )}
         </div>
       )
     }
 
-    if (!hasAttributes || !blockTotal) return null
-
     const attrs = (block.attributes || []).filter(a => a.value || a.label)
-    const nonMonetary = attrs.filter(a => !isMonetary(a.label))
-    const monetaryAttr = attrs.find(a => isMonetary(a.label))
+    const nonMonetary = attrs.filter(a => !isMonetary((a.label || '').toLowerCase()))
+    const monetaryAttr = attrs.find(a => isMonetary((a.label || '').toLowerCase()))
+
+    if (tags.length === 0 && attrs.length === 0) return null
 
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end', flexShrink: 0 }}>
+        {/* etiqueta — en gris claro, sin # */}
+        {tags.length > 0 && (
+          <span style={{ color: 'var(--color-text-light)', fontSize: '13px', opacity: 0.6 }}>
+            {tags[0]}
+          </span>
+        )}
         {nonMonetary.map((a) => (
-          <span key={a.id} style={{ color: 'var(--color-text-light)', fontSize: '14px' }}>{a.value}{a.label}</span>
+          <span key={a.id} style={{ color: 'var(--color-text-light)', fontSize: '14px' }}>{a.value} {a.label}</span>
         ))}
         {blockTotal?.hasCalc && (
           <span style={{ color: 'var(--color-text)', fontSize: '14px', fontVariantNumeric: 'tabular-nums' }}>
@@ -265,7 +282,6 @@ function Block({
       {/* ── fila principal ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 0' }}>
 
-        {/* handle drag */}
         <div
           draggable
           onDragStart={handleDragStart}
@@ -274,13 +290,11 @@ function Block({
           style={{ cursor: 'grab', color: 'var(--color-text-light)', fontSize: '18px', opacity: showHandle ? 1 : 0, transition: 'opacity 0.15s', userSelect: 'none', flexShrink: 0, lineHeight: 1, padding: '8px 4px' }}
         >⠿</div>
 
-        {/* chevron */}
         <div
           onClick={e => { e.stopPropagation(); setExpanded(prev => !prev) }}
           style={{ flexShrink: 0, width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-light)', fontSize: '14px', cursor: 'pointer', userSelect: 'none' }}
         >{expanded ? '▾' : '▸'}</div>
 
-        {/* título */}
         <input
           ref={inputRef}
           type="text"
@@ -299,14 +313,12 @@ function Block({
           }}
         />
 
-        {/* derecha colapsada: resumen hijos o atributos propios */}
         {!expanded && !isEditingTitle && (
           <div onClick={e => e.stopPropagation()}>
             {renderCollapsedRight()}
           </div>
         )}
 
-        {/* menú ··· */}
         <div style={{ position: 'relative', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
           <button
             onClick={e => { e.stopPropagation(); setMenuOpen(!menuOpen) }}
@@ -324,6 +336,21 @@ function Block({
       {/* ── contenido desplegado ── */}
       {expanded && (
         <div style={{ paddingLeft: '36px', paddingBottom: '12px' }}>
+
+          {/* etiqueta expandida — píldora */}
+          {tags.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+              {tags.map((tag, i) => (
+                <div key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(0,0,0,0.06)', borderRadius: '20px', padding: '3px 10px', fontSize: '13px' }}>
+                  <span style={{ color: 'var(--color-text-light)' }}>{tag}</span>
+                  <span
+                    onClick={() => onChange({ ...block, tags: tags.filter((_, j) => j !== i) })}
+                    style={{ cursor: 'pointer', color: 'var(--color-text-light)', fontSize: '13px', lineHeight: 1, marginLeft: '2px' }}
+                  >×</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* atributos propios */}
           <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
@@ -383,6 +410,7 @@ function Block({
                     onDragStart={(b) => { dragInfo.current = { block: b, parentId: block.id }; onDragStart(b, block.id) }}
                     onDragEnd={onDragEnd} dragInfo={dragInfo} showDivider={true}
                     allAttributes={allAttributes} collapseAll={collapseAll}
+                    inputRef={child.id === newChildId ? onNewChildRef : undefined}
                   />
                 </div>
               ))}
@@ -390,17 +418,22 @@ function Block({
                 <div style={{ height: '2px', background: 'var(--color-text)', borderRadius: '1px', margin: '2px 0' }} />
               )}
 
-              {/* totales de hijos expandidos — solo si hay hijos con datos */}
-              {hasChildren && childrenSummary.length > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingTop: '8px', paddingLeft: '0', borderTop: '1px solid var(--color-border)', marginTop: '4px' }}>
+              <div
+                onClick={() => onAddChild(block.id)}
+                style={{ minHeight: '32px', cursor: 'text', display: 'flex', alignItems: 'center', paddingLeft: '20px', color: 'var(--color-text-light)', fontSize: '14px', opacity: 0.4, userSelect: 'none' }}
+              >+</div>
+
+              {hasChildren && hasChildTotals && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingTop: '8px', borderTop: '1px solid var(--color-border)', marginTop: '4px' }}>
                   <span style={{ flex: 1, fontSize: '13px', color: 'var(--color-text-light)' }}>Total</span>
-                  {childrenSummary.map((s, i) => (
-                    <span key={i} style={{ fontSize: '13px', color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>{s}</span>
+                  {childrenTotals.units.map(ut => (
+                    <span key={ut.label} style={{ fontSize: '13px', color: 'var(--color-text-light)', fontVariantNumeric: 'tabular-nums' }}>{ut.childStr}</span>
                   ))}
+                  {childrenTotals.monetary && (
+                    <span style={{ fontSize: '13px', color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>{childrenTotals.monetary.childStr}</span>
+                  )}
                 </div>
               )}
-
-              <button onClick={() => onAddChild(block.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-light)', fontSize: '14px', padding: '6px 0', marginLeft: '0' }}>+ Nuevo</button>
             </div>
           )}
         </div>
