@@ -17,21 +17,18 @@ function App() {
   const createNote = () => {
     const newNote = {
       id: Date.now().toString(),
-      isStructured: false,
       title: '',
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      blocks: [
-        {
-          id: Date.now().toString() + '-block',
-          title: '',
-          body: '',
-          attributes: [],
-          children: [],
-          collapsed: false,
-          order: 0
-        }
-      ]
+      blocks: [{
+        id: Date.now().toString() + '-block',
+        title: '',
+        body: '',
+        attributes: [],
+        children: [],
+        collapsed: false,
+        order: 0
+      }]
     }
     setNotes(prev => [newNote, ...prev])
     setSelectedNote(newNote)
@@ -76,7 +73,15 @@ function App() {
     if (isEmpty) {
       deleteNote(finalNote.id)
     } else {
-      setNotes(prev => prev.map(n => n.id === finalNote.id ? { ...finalNote, updatedAt: Date.now() } : n))
+      // Solo actualizar updatedAt si la nota realmente cambió
+      const original = notes.find(n => n.id === finalNote.id)
+      const hasChanged = !original ||
+        JSON.stringify(original.blocks) !== JSON.stringify(finalNote.blocks) ||
+        original.title !== finalNote.title
+      setNotes(prev => prev.map(n => n.id === finalNote.id
+        ? { ...finalNote, updatedAt: hasChanged ? Date.now() : (original?.updatedAt ?? Date.now()) }
+        : n
+      ))
       setSelectedNote(null)
     }
   }

@@ -3,10 +3,10 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import Block from './Block'
 import {
   MONETARY, isMonetary, formatMonetary, normalizeDecimal,
-  computeSubtotal, computeUnitTotals, computeTagTotals
+  computeSubtotal, computeUnitTotals, computeTagTotals,
+  isStructuredNote, displayTag, formatUnitTotal
 } from '../utils/totals'
 
-// ─── atributos del título ─────────────────────────────────────
 const parseTitleAttributes = (raw) => {
   const tokenRegex = /(?:^|(?<=\s))[@=]\s*(-?\d+[.,]?\d*(?:\/\d+[.,]?\d*)?)\s*([a-zA-Z%$€£°²³]*)/g
   const attrs = []
@@ -16,9 +16,7 @@ const parseTitleAttributes = (raw) => {
     const label = match[2].toLowerCase()
     attrs.push({ id: Date.now().toString() + Math.random(), value, label })
   }
-  const cleanTitle = raw
-    .replace(/(?:^|(?<=\s))[@=]\s*-?\d+[.,]?\d*(?:\/\d+[.,]?\d*)?\s*[a-zA-Z%$€£°²³]*/g, '')
-    .trim()
+  const cleanTitle = raw.replace(/(?:^|(?<=\s))[@=]\s*-?\d+[.,]?\d*(?:\/\d+[.,]?\d*)?\s*[a-zA-Z%$€£°²³]*/g, '').trim()
   return { cleanTitle, attrs }
 }
 
@@ -28,7 +26,6 @@ const reconstructRawTitleNote = (title, attributes) => {
   return `${title} ${tokens}`.trim()
 }
 
-// ─── parser de modificadores ──────────────────────────────────
 const parseModifier = (raw) => {
   const tokenMatch = raw.match(/[@=]\s*(-?\d+[.,]?\d*)\s*([%$€£]?)([a-zA-Z°\/²³]*)/)
   if (!tokenMatch) return null
@@ -36,15 +33,14 @@ const parseModifier = (raw) => {
   const symbol = tokenMatch[2]
   const wordAfter = tokenMatch[3]
   const labelBefore = raw.replace(/[@=]\s*-?\d+[.,]?\d*\s*[%$€£]?[a-zA-Z°\/²³]*/g, '').trim()
-  const rawLabel = labelBefore || wordAfter || symbol || 'Modificador'
-  const label = rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1)
+  const rawLabel = labelBefore || wordAfter || symbol || ''
+  const label = rawLabel ? rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1) : ''
   if (symbol === '%') return { label, type: 'percent', value }
   if (['€', '$', '£'].includes(symbol)) return { label, type: 'fixed', value, currency: symbol }
   if (!isNaN(value) && value !== 0) return { label, type: 'divide', value, unit: wordAfter }
   return null
 }
 
-// ─── aplicar modificadores en cascada ────────────────────────
 const applyModifiers = (subtotal, modifiers, currency) => {
   let running = subtotal
   const steps = []
@@ -83,12 +79,21 @@ const parseInlineAttributes = (raw) => {
   return { cleanTitle, attrs: [...attrs.filter(a => !MONETARY.includes(a.label)), ...attrs.filter(a => MONETARY.includes(a.label))] }
 }
 
+const hasInlineTokens = (text) =>
+  /(?:^|(?<=\s))[@=]\s*-?\d+[.,]?\d*\s*[a-zA-Z%$€£°\/²³]*/.test(text)
+
+const autoResize = (el) => {
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = el.scrollHeight + 'px'
+}
+
 const stepToRaw = (step) => {
   if (step.type === 'percent') return `${step.label} @${step.value}%`
   if (step.type === 'fixed') return `${step.label} @${step.value}${step.currency}`
   if (step.type === 'divide') {
-    const labelIsUnit = step.label.toLowerCase() === step.unit.toLowerCase()
-    return labelIsUnit ? `${step.label} @${step.value}` : `${step.label} @${step.value}${step.unit}`
+    const labelIsUnit = step.label.toLowerCase() === (step.unit || '').toLowerCase()
+    return labelIsUnit ? `${step.label} @${step.value}` : `${step.label ? step.label + ' ' : ''}@${step.value}${step.unit}`
   }
   return step.label
 }
@@ -100,16 +105,31 @@ function ModRow({ step, isDragging, isDragOver, isEditing, editingRaw, onEditing
   onStartEdit, onCommitEdit, onCancelEdit, onDelete, onDragStart, onDragOver, onDrop, onDragEnd, currency, numColWidth }) {
   const [hovered, setHovered] = useState(false)
 
-  const paramLabel = () => {
-    if (step.type === 'percent') return `(${step.value}%)`
-    if (step.type === 'fixed') return `(${step.value >= 0 ? '+' : ''}${step.value}${step.currency})`
-    if (step.type === 'divide') return `÷${step.value}`
-    return ''
+  const leftLabel = () => {
+    if (step.type === 'percent') {
+      // label + parámetro en gris
+      return (
+        <>
+          {step.label || '—'}
+          <span style={{ marginLeft: '4px', opacity: 0.6 }}>({step.value}%)</span>
+        </>
+      )
+    }
+    if (step.type === 'fixed') {
+      // label solo, sin parámetro (el resultado ya está a la derecha)
+      return step.label || '—'
+    }
+    if (step.type === 'divide') {
+      // opción A: ÷N en lugar de label
+      return <span>÷{step.value}</span>
+    }
+    return step.label || '—'
   }
 
   const resultLabel = () => {
-    if (step.type === 'percent') return `${step.delta >= 0 ? '+' : ''}${formatMonetary(step.delta)}${step.currency}`
-    if (step.type === 'fixed') return `${step.delta >= 0 ? '+' : ''}${formatMonetary(step.delta)}${step.currency}`
+    // Sin + en positivos
+    if (step.type === 'percent') return `${step.delta < 0 ? '' : ''}${formatMonetary(step.delta)}${step.currency}`
+    if (step.type === 'fixed') return `${formatMonetary(step.delta)}${step.currency}`
     if (step.type === 'divide' && step.perUnit !== null) return formatMonetary(step.perUnit) + step.currency
     return ''
   }
@@ -132,7 +152,6 @@ function ModRow({ step, isDragging, isDragOver, isEditing, editingRaw, onEditing
       }}
     >
       <span style={{ color: 'var(--color-text-light)', fontSize: '14px', cursor: 'grab', flexShrink: 0, userSelect: 'none', lineHeight: 1, opacity: hovered ? 0.5 : 0, transition: 'opacity 0.15s', width: '14px' }}>⠿</span>
-
       {isEditing ? (
         <input autoFocus value={editingRaw} onChange={e => onEditingRawChange(e.target.value)}
           onBlur={onCommitEdit}
@@ -144,8 +163,7 @@ function ModRow({ step, isDragging, isDragOver, isEditing, editingRaw, onEditing
         <>
           <span onClick={e => { e.stopPropagation(); onStartEdit(step) }}
             style={{ flex: 1, color: 'var(--color-text-light)', cursor: 'text', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {step.label || '—'}
-            {paramLabel() && <span style={{ marginLeft: '4px', opacity: 0.7 }}>{paramLabel()}</span>}
+            {leftLabel()}
           </span>
           <span onClick={e => { e.stopPropagation(); onStartEdit(step) }}
             style={{ color: 'var(--color-text)', fontSize: '14px', fontVariantNumeric: 'tabular-nums', cursor: 'text', flexShrink: 0, width: numColWidth, textAlign: 'right' }}>
@@ -204,15 +222,15 @@ function UnitTotalPanel({ ut, modifiers, onSaveModifiers }) {
   const { steps, finalTotal } = applyModifiersUnit(ut.total, modifiers)
   const hasChangingSteps = steps.some(s => s.type !== 'divide')
 
+  const displayTotal = formatUnitTotal(ut.total, ut.hasDecimals)
+  const displayFinal = formatUnitTotal(finalTotal, ut.hasDecimals)
+
   const addModifier = () => {
     if (!modInput.trim() || !parseModifierUnit(modInput)) return
-    const newMod = { id: Date.now().toString(), raw: modInput.trim() }
+    onSaveModifiers([...modifiers, { id: Date.now().toString(), raw: modInput.trim() }])
     setModInput('')
-    onSaveModifiers([...modifiers, newMod])
   }
-
   const deleteModifier = (id) => onSaveModifiers(modifiers.filter(m => m.id !== id))
-
   const commitEdit = () => {
     if (!editingModRaw.trim()) { deleteModifier(editingModId); setEditingModId(null); return }
     if (!parseModifierUnit(editingModRaw)) { setEditingModId(null); return }
@@ -222,36 +240,28 @@ function UnitTotalPanel({ ut, modifiers, onSaveModifiers }) {
 
   return (
     <div>
-      <div
-        style={{ display: 'flex', alignItems: 'center', paddingLeft: '36px', paddingTop: '10px', cursor: 'pointer' }}
-        onClick={() => setExpanded(v => !v)}
-      >
-        <span style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: 'var(--color-text)' }}>
-          Total {ut.label}
-        </span>
+      <div style={{ display: 'flex', alignItems: 'center', paddingLeft: '36px', paddingTop: '10px', cursor: 'pointer' }} onClick={() => setExpanded(v => !v)}>
+        <span style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: 'var(--color-text)' }}>Total {ut.label}</span>
         <span style={{ fontSize: '15px', fontWeight: '600', color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums', width: NUM_COL_WIDTH, textAlign: 'right' }}>
-          {expanded ? ut.total : finalTotal} {ut.label}
+          {expanded ? displayTotal : displayFinal} {ut.label}
         </span>
         <span style={{ fontSize: '10px', color: 'var(--color-text-light)', opacity: 0.5, transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', display: 'inline-block', lineHeight: 1, marginLeft: '6px', width: '20px', textAlign: 'center' }}>▾</span>
       </div>
-
       {expanded && (
         <div style={{ paddingBottom: '4px' }}>
           {steps.map(step => (
             <div key={step.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingLeft: '36px', paddingTop: '6px', paddingBottom: '6px', fontSize: '14px' }}>
               {editingModId === step.id ? (
-                <input autoFocus value={editingModRaw}
-                  onChange={e => setEditingModRaw(e.target.value)}
-                  onBlur={commitEdit}
-                  onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingModId(null) }}
+                <input autoFocus value={editingModRaw} onChange={e => setEditingModRaw(e.target.value)}
+                  onBlur={commitEdit} onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingModId(null) }}
                   style={{ flex: 1, border: 'none', borderBottom: '1px solid var(--color-border)', outline: 'none', fontFamily: 'var(--font-main)', fontSize: '14px', color: 'var(--color-text)', background: 'transparent' }}
                 />
               ) : (
                 <>
                   <span onClick={() => { setEditingModId(step.id); setEditingModRaw(stepToRawUnit(step)) }}
                     style={{ flex: 1, color: 'var(--color-text-light)', cursor: 'text' }}>
-                    {step.label}
-                    {step.paramStr && <span style={{ marginLeft: '4px', opacity: 0.7 }}>{step.paramStr}</span>}
+                    {step.type === 'divide' ? `÷${step.value}` : step.label}
+                    {step.type === 'percent' && <span style={{ marginLeft: '4px', opacity: 0.6 }}>({step.value}%)</span>}
                   </span>
                   <span style={{ color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums', width: NUM_COL_WIDTH, textAlign: 'right' }}>{step.resultStr}</span>
                 </>
@@ -259,13 +269,11 @@ function UnitTotalPanel({ ut, modifiers, onSaveModifiers }) {
               <span onClick={() => deleteModifier(step.id)} style={{ cursor: 'pointer', color: 'var(--color-text-light)', fontSize: '14px', width: '20px', textAlign: 'center', opacity: 0.3 }}>×</span>
             </div>
           ))}
-
           <ModAddRow modInput={modInput} setModInput={setModInput} addModifier={addModifier} modInputRef={modInputRef} hasItems={steps.length > 0} />
-
           {hasChangingSteps && (
             <div style={{ display: 'flex', alignItems: 'center', paddingLeft: '36px', paddingTop: '10px', borderTop: '1px solid var(--color-border)', fontSize: '15px', fontWeight: '600', color: 'var(--color-text)' }}>
               <span style={{ flex: 1 }}>Total {ut.label}</span>
-              <span style={{ fontVariantNumeric: 'tabular-nums', width: NUM_COL_WIDTH, textAlign: 'right' }}>{finalTotal} {ut.label}</span>
+              <span style={{ fontVariantNumeric: 'tabular-nums', width: NUM_COL_WIDTH, textAlign: 'right' }}>{displayFinal} {ut.label}</span>
               <span style={{ width: '26px' }} />
             </div>
           )}
@@ -282,8 +290,8 @@ const parseModifierUnit = (raw) => {
   const symbol = tokenMatch[2]
   const wordAfter = tokenMatch[3]
   const labelBefore = raw.replace(/[@=]\s*-?\d+[.,]?\d*\s*[%]?[a-zA-Z°\/²³]*/g, '').trim()
-  const rawLabel = labelBefore || wordAfter || symbol || 'Modificador'
-  const label = rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1)
+  const rawLabel = labelBefore || wordAfter || symbol || ''
+  const label = rawLabel ? rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1) : ''
   if (symbol === '%') return { label, type: 'percent', value }
   if (!isNaN(value) && value !== 0) return { label, type: 'divide', value, unit: wordAfter }
   return null
@@ -295,15 +303,13 @@ const applyModifiersUnit = (subtotal, modifiers) => {
   for (const mod of modifiers) {
     const parsed = parseModifierUnit(mod.raw)
     if (!parsed) continue
-    let delta = 0
-    let perUnit = null
+    let delta = 0; let perUnit = null
     if (parsed.type === 'percent') delta = Math.round(running * parsed.value) / 100
     else if (parsed.type === 'divide') perUnit = Math.round((running / parsed.value) * 100) / 100
-    const paramStr = parsed.type === 'percent' ? `(${parsed.value}%)` : `÷${parsed.value}`
     const resultStr = parsed.type === 'percent'
-      ? `${delta >= 0 ? '+' : ''}${Math.round(delta * 100) / 100}`
+      ? `${formatMonetary(Math.round(delta * 100) / 100)}`
       : (perUnit !== null ? `${perUnit}` : '')
-    steps.push({ id: mod.id, label: parsed.label, type: parsed.type, value: parsed.value, delta: Math.round(delta * 100) / 100, perUnit, paramStr, resultStr })
+    steps.push({ id: mod.id, label: parsed.label, type: parsed.type, value: parsed.value, delta: Math.round(delta * 100) / 100, perUnit, resultStr })
     if (parsed.type !== 'divide') running = Math.round((running + delta) * 100) / 100
   }
   return { steps, finalTotal: running }
@@ -311,11 +317,11 @@ const applyModifiersUnit = (subtotal, modifiers) => {
 
 const stepToRawUnit = (step) => {
   if (step.type === 'percent') return `${step.label} @${step.value}%`
-  if (step.type === 'divide') return `${step.label} @${step.value}`
+  if (step.type === 'divide') return `@${step.value}`
   return step.label
 }
 
-// ─── atributos del título (colapsables) ───────────────────────
+// ─── atributos del título ─────────────────────────────────────
 function TitleAttributes({ attributes, onUpdate, onAdd, onDelete, expanded, setExpanded }) {
   const [editingId, setEditingId] = useState(null)
 
@@ -326,22 +332,15 @@ function TitleAttributes({ attributes, onUpdate, onAdd, onDelete, expanded, setE
     onUpdate(attributes.map(a => a.id === id ? { ...a, [field]: value } : a))
   }
 
-  const commitEdit = () => setEditingId(null)
-
   if (attributes.length === 0 && !expanded) return null
-
   const collapsedLine = attributes.map(a => `${a.value}${a.label}`).join('  ·  ')
 
   return (
     <div style={{ marginBottom: '12px' }}>
-      <div onClick={() => setExpanded(v => !v)}
-        style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', userSelect: 'none', marginBottom: expanded ? '8px' : '0' }}>
+      <div onClick={() => setExpanded(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', userSelect: 'none', marginBottom: expanded ? '8px' : '0' }}>
         <span style={{ fontSize: '10px', color: 'var(--color-text-light)', opacity: 0.5, transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', display: 'inline-block', lineHeight: 1 }}>▾</span>
-        {!expanded && (
-          <span style={{ fontSize: '13px', color: 'var(--color-text-light)', letterSpacing: '0.01em' }}>{collapsedLine}</span>
-        )}
+        {!expanded && <span style={{ fontSize: '13px', color: 'var(--color-text-light)', letterSpacing: '0.01em' }}>{collapsedLine}</span>}
       </div>
-
       {expanded && (
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
           {attributes.map(attr => (
@@ -349,10 +348,12 @@ function TitleAttributes({ attributes, onUpdate, onAdd, onDelete, expanded, setE
               {editingId === attr.id ? (
                 <>
                   <input autoFocus value={attr.value} onChange={e => updateAttr(attr.id, 'value', e.target.value)}
-                    onBlur={commitEdit} onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Tab') commitEdit() }}
+                    onBlur={() => setEditingId(null)}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Tab') setEditingId(null) }}
                     placeholder="valor" style={{ width: '40px', border: 'none', outline: 'none', background: 'transparent', fontSize: '13px', fontFamily: 'var(--font-main)' }} />
                   <input value={attr.label} onChange={e => updateAttr(attr.id, 'label', e.target.value)}
-                    onBlur={commitEdit} onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Tab') commitEdit() }}
+                    onBlur={() => setEditingId(null)}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Tab') setEditingId(null) }}
                     placeholder="unidad" style={{ width: '44px', border: 'none', outline: 'none', background: 'transparent', fontSize: '13px', fontFamily: 'var(--font-main)' }} />
                 </>
               ) : (
@@ -406,11 +407,10 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   const observerRef = useRef(null)
   const blockInputRefs = useRef({})
   const containerRef = useRef(null)
-  const footerRef = useRef(null)
+  const simpleTextareaRef = useRef(null)
 
-  const isStructured = note.isStructured || blocks.length > 1
+  const isStructured = isStructuredNote(blocks)
   const allAttributes = blocks.flatMap(b => [...(b.attributes || []), ...(b.children || []).flatMap(c => c.attributes || [])])
-
   const subtotalResult = isStructured ? computeSubtotal(blocks) : null
   const unitTotals = isStructured ? computeUnitTotals(blocks) : []
   const tagTotals = isStructured ? computeTagTotals(blocks) : []
@@ -447,10 +447,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   }, [newBlockId, blocks])
 
   useEffect(() => {
-    if (newChildId && newChildTitleRef.current) {
-      newChildTitleRef.current.focus()
-      setNewChildId(null)
-    }
+    if (newChildId && newChildTitleRef.current) { newChildTitleRef.current.focus(); setNewChildId(null) }
   }, [newChildId, blocks])
 
   useEffect(() => {
@@ -460,15 +457,8 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   }, [editingSubtotalLabel])
 
   useEffect(() => {
-    const updateFooterHeight = () => {
-      if (!footerRef.current) return
-      const rect = footerRef.current.getBoundingClientRect()
-      footerRef.current.style.minHeight = Math.max(80, window.innerHeight - rect.top) + 'px'
-    }
-    updateFooterHeight()
-    window.addEventListener('resize', updateFooterHeight)
-    return () => window.removeEventListener('resize', updateFooterHeight)
-  }, [hasTotals, modExpanded, modifiers])
+    if (!isStructured) autoResize(simpleTextareaRef.current)
+  }, [isStructured, blocks])
 
   const buildNote = (patch = {}) => ({
     ...note, title, blocks, modifiers, footerNote, subtotalLabel, titleAttributes, unitModifiers,
@@ -493,18 +483,11 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
 
   const handleTitleBlur = () => {
     setIsEditingNoteTitle(false)
-    if (!rawNoteTitle.trim()) {
-      setTitle(''); setTitleAttributes([])
-      onUpdate(buildNote({ title: '', titleAttributes: [] })); return
-    }
+    if (!rawNoteTitle.trim()) { setTitle(''); setTitleAttributes([]); onUpdate(buildNote({ title: '', titleAttributes: [] })); return }
     const { cleanTitle, attrs } = parseTitleAttributes(rawNoteTitle)
     const newAttrs = attrs.slice(0, 3)
     setTitle(cleanTitle); setTitleAttributes(newAttrs)
-    if (newAttrs.length > 0 && !isStructured) {
-      onUpdate(buildNote({ title: cleanTitle, titleAttributes: newAttrs, isStructured: true }))
-    } else {
-      onUpdate(buildNote({ title: cleanTitle, titleAttributes: newAttrs }))
-    }
+    onUpdate(buildNote({ title: cleanTitle, titleAttributes: newAttrs }))
   }
 
   const handleTitleKeyDown = (e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur() } }
@@ -539,10 +522,13 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
   const handleBlockDelete = (id) => {
     if (blocks.length === 1) return
     const newBlocks = removeBlock(blocks, id)
-    if (newBlocks.length === 1 && (newBlocks[0].attributes || []).length === 0) {
+    if (newBlocks.length === 1 && (newBlocks[0].attributes || []).length === 0 && (newBlocks[0].children || []).length === 0) {
       const b = newBlocks[0]
-      save([{ ...b, body: b.body?.trim() ? b.body : (b.title?.trim() ? b.title : ''), title: '', collapsed: false }], title, { isStructured: false })
-    } else { save(newBlocks) }
+      const body = b.body?.trim() ? b.body : (b.title?.trim() ? b.title : '')
+      save([{ ...b, body, title: '', collapsed: false }])
+    } else {
+      save(newBlocks)
+    }
   }
 
   const handleBlockDuplicate = (block) => {
@@ -569,35 +555,40 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
 
   const handleConvertToStructured = (block, rawBody) => {
     const { cleanTitle, attrs } = parseInlineAttributes(rawBody)
-    const convertedBlock = { ...block, id: block.id + '-converted', title: cleanTitle || rawBody.replace(/[@=]\S*/g, '').trim(), body: '', attributes: attrs, collapsed: true }
+    const convertedBlock = {
+      ...block, id: block.id + '-converted',
+      title: cleanTitle || rawBody.replace(/[@=]\S*/g, '').trim(),
+      body: '', attributes: attrs, collapsed: true
+    }
     const newId = Date.now().toString()
     const newBlocks = [convertedBlock, { id: newId, title: '', body: '', attributes: [], children: [], collapsed: true, order: 1 }]
     setBlocks(newBlocks)
-    onUpdate(buildNote({ blocks: newBlocks, isStructured: true }))
+    onUpdate(buildNote({ blocks: newBlocks }))
     setNewBlockId(newId)
   }
 
   const addBlock = () => {
     const lastBlock = blocks[blocks.length - 1]
-    if (isBlockEmpty(lastBlock)) { const r = blockInputRefs.current[lastBlock.id]; if (r) r.focus(); return }
+    if (isBlockEmpty(lastBlock)) {
+      const r = blockInputRefs.current[lastBlock.id]; if (r) r.focus(); return
+    }
     let currentBlocks = blocks
-    if (blocks.length === 1 && blocks[0].body.trim() && !blocks[0].title.trim()) {
-      currentBlocks = [{ ...blocks[0], id: Date.now().toString() + '-migrated', title: blocks[0].body, body: '', collapsed: true }]
+    if (!isStructured && blocks.length === 1) {
+      currentBlocks = [{ ...blocks[0], id: blocks[0].id + '-m', title: blocks[0].body || '', body: '', collapsed: true }]
     } else {
       currentBlocks = currentBlocks.map(b => ({ ...b, id: b.id + '-r', collapsed: true }))
     }
     const newId = Date.now().toString()
     const newBlocks = [...currentBlocks, { id: newId, title: '', body: '', attributes: [], children: [], collapsed: true, order: currentBlocks.length }]
     setBlocks(newBlocks)
-    onUpdate(buildNote({ blocks: newBlocks, isStructured: true }))
+    onUpdate(buildNote({ blocks: newBlocks }))
     setNewBlockId(newId)
   }
 
   const addModifier = () => {
     if (!modInput.trim() || !parseModifier(modInput)) return
-    const newMod = { id: Date.now().toString(), raw: modInput.trim() }
+    saveModifiers([...modifiers, { id: Date.now().toString(), raw: modInput.trim() }])
     setModInput('')
-    saveModifiers([...modifiers, newMod])
   }
 
   const deleteModifier = (id) => saveModifiers(modifiers.filter(m => m.id !== id))
@@ -672,9 +663,8 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
 
   const handleDragLeaveContainer = (e) => { if (!blocksRef.current?.contains(e.relatedTarget)) setDropIndicator(null) }
 
-  const resolveInputRef = (blockId, i) => {
+  const resolveInputRef = (blockId) => {
     if (blockId === newBlockId) return newBlockTitleRef
-    if (i === 0 && !isStructured) return firstBlockRef
     return (el) => { blockInputRefs.current[blockId] = el }
   }
 
@@ -721,11 +711,7 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
           <span style={{ flex: 1 }} />
           {unitTotals.map(ut => {
             const { finalTotal: ft } = applyModifiersUnit(ut.total, unitModifiers[ut.label] || [])
-            return (
-              <span key={ut.label} style={{ fontSize: '14px', color: 'var(--color-text-light)', fontVariantNumeric: 'tabular-nums', marginRight: '12px' }}>
-                {ft} {ut.label}
-              </span>
-            )
+            return <span key={ut.label} style={{ fontSize: '14px', color: 'var(--color-text-light)', fontVariantNumeric: 'tabular-nums', marginRight: '12px' }}>{formatUnitTotal(ft, ut.hasDecimals)} {ut.label}</span>
           })}
           {noteTotal && (
             <span style={{ fontSize: '15px', fontWeight: '600', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text)', width: NUM_COL_WIDTH, textAlign: 'right' }}>
@@ -737,138 +723,150 @@ function NoteDetail({ note, onBack, onUpdate, onDelete }) {
 
       {!(hasTotals && !totalVisible) && <div style={{ marginBottom: '16px' }} />}
 
-      {/* bloques */}
-      <div ref={blocksRef} onDragOver={handleDragOverContainer} onDrop={handleDropOnContainer} onDragLeave={handleDragLeaveContainer}>
-        {blocks.map((block, i) => (
-          <div key={block.id} style={{ position: 'relative' }}>
-            {dropIndicator?.parentId === null && dropIndicator.beforeIndex === i && (
+      {/* ── vista simple ── */}
+      {!isStructured ? (
+        <div>
+          <textarea
+            ref={(el) => { simpleTextareaRef.current = el; firstBlockRef.current = el }}
+            value={blocks[0]?.body || ''}
+            onChange={e => {
+              const newBlocks = [{ ...blocks[0], body: e.target.value }]
+              setBlocks(newBlocks)
+              onUpdate(buildNote({ blocks: newBlocks }))
+              autoResize(e.target)
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && hasInlineTokens(e.target.value)) {
+                e.preventDefault(); handleConvertToStructured(blocks[0], e.target.value)
+              }
+            }}
+            onBlur={e => { if (hasInlineTokens(e.target.value)) handleConvertToStructured(blocks[0], e.target.value) }}
+            placeholder="Nota"
+            rows={1}
+            style={{ width: '100%', minHeight: '28px', border: 'none', outline: 'none', fontFamily: 'var(--font-main)', fontSize: '15px', color: 'var(--color-text)', resize: 'none', lineHeight: '1.6', background: 'transparent', display: 'block', boxSizing: 'border-box', overflow: 'hidden' }}
+          />
+          <div onClick={addBlock} style={{ minHeight: '60px', cursor: 'text', display: 'flex', alignItems: 'center', color: 'var(--color-text-light)', fontSize: '14px', opacity: 0.4, userSelect: 'none', marginTop: '8px' }}>+</div>
+        </div>
+      ) : (
+        /* ── vista estructurada ── */
+        <>
+          <div ref={blocksRef} onDragOver={handleDragOverContainer} onDrop={handleDropOnContainer} onDragLeave={handleDragLeaveContainer}>
+            {blocks.map((block, i) => (
+              <div key={block.id} style={{ position: 'relative' }}>
+                {dropIndicator?.parentId === null && dropIndicator.beforeIndex === i && (
+                  <div style={{ height: '2px', background: 'var(--color-text)', borderRadius: '1px', margin: '2px 0' }} />
+                )}
+                <Block
+                  block={block} depth={0}
+                  onChange={handleBlockChange} onDelete={handleBlockDelete}
+                  onDuplicate={handleBlockDuplicate} onAddChild={handleAddChild}
+                  onDragStart={handleDragStart} onDragEnd={handleDragEnd}
+                  childDropIndicator={dropIndicator?.parentId === block.id ? dropIndicator : null}
+                  dragInfo={dragInfo} inputRef={resolveInputRef(block.id)}
+                  allAttributes={allAttributes} collapseAll={collapseAll}
+                  newChildId={newChildId} onNewChildRef={newChildTitleRef}
+                />
+              </div>
+            ))}
+            {dropIndicator?.parentId === null && dropIndicator.beforeIndex === blocks.length && (
               <div style={{ height: '2px', background: 'var(--color-text)', borderRadius: '1px', margin: '2px 0' }} />
             )}
-            <Block
-              block={block} depth={0}
-              onChange={handleBlockChange} onDelete={handleBlockDelete}
-              onDuplicate={handleBlockDuplicate} onAddChild={handleAddChild}
-              onDragStart={handleDragStart} onDragEnd={handleDragEnd}
-              isDropTarget={false}
-              childDropIndicator={dropIndicator?.parentId === block.id ? dropIndicator : null}
-              dragInfo={dragInfo} inputRef={resolveInputRef(block.id, i)}
-              showDivider={isStructured} allAttributes={allAttributes}
-              onConvertToStructured={handleConvertToStructured} collapseAll={collapseAll}
-              newChildId={newChildId}
-              onNewChildRef={newChildTitleRef}
-            />
           </div>
-        ))}
-        {dropIndicator?.parentId === null && dropIndicator.beforeIndex === blocks.length && (
-          <div style={{ height: '2px', background: 'var(--color-text)', borderRadius: '1px', margin: '2px 0' }} />
-        )}
-      </div>
 
-      {/* zona + padre */}
-      <div onClick={e => { e.stopPropagation(); addBlock() }} style={{ minHeight: '60px', cursor: 'text', display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, color: 'var(--color-text-light)', fontSize: '14px', opacity: 0.4, userSelect: 'none' }}>+</div>
+          <div onClick={e => { e.stopPropagation(); addBlock() }} style={{ minHeight: '60px', cursor: 'text', display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, color: 'var(--color-text-light)', fontSize: '14px', opacity: 0.4, userSelect: 'none' }}>+</div>
 
-      {/* ── totales inferiores ── */}
-      {hasTotals && (
-        <div onClick={e => e.stopPropagation()}>
-          <div style={{ borderTop: '2px solid var(--color-text)', marginTop: '16px', opacity: 0.15 }} />
+          {hasTotals && (
+            <div onClick={e => e.stopPropagation()}>
+              <div style={{ borderTop: '2px solid var(--color-text)', marginTop: '16px', opacity: 0.15 }} />
 
-          {/* totales por unidad no monetaria */}
-          {unitTotals.map(ut => (
-            <UnitTotalPanel
-              key={ut.label} ut={ut}
-              modifiers={unitModifiers[ut.label] || []}
-              onSaveModifiers={(mods) => saveUnitModifiers({ ...unitModifiers, [ut.label]: mods })}
-            />
-          ))}
+              {unitTotals.map(ut => (
+                <UnitTotalPanel key={ut.label} ut={ut}
+                  modifiers={unitModifiers[ut.label] || []}
+                  onSaveModifiers={(mods) => saveUnitModifiers({ ...unitModifiers, [ut.label]: mods })}
+                />
+              ))}
 
-          {!noteTotal && unitTotals.length > 0 && <div ref={totalNumberRef} style={{ height: '1px' }} />}
+              {!noteTotal && unitTotals.length > 0 && <div ref={totalNumberRef} style={{ height: '1px' }} />}
 
-          {/* total monetario */}
-          {noteTotal && (
-            <>
-              <div
-                style={{ display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, paddingTop: '12px', paddingBottom: modExpanded ? '4px' : '0', cursor: 'pointer' }}
-                onClick={() => setModExpanded(v => !v)}
-              >
-                {modExpanded ? (
-                  modSteps.some(s => s.type !== 'divide') ? (
-                    editingSubtotalLabel ? (
-                      <input ref={subtotalLabelRef} value={subtotalLabel}
-                        onChange={e => setSubtotalLabel(e.target.value)}
-                        onBlur={() => { saveSubtotalLabel(subtotalLabel); setEditingSubtotalLabel(false) }}
-                        onKeyDown={e => { if (e.key === 'Enter') { saveSubtotalLabel(subtotalLabel); setEditingSubtotalLabel(false) } }}
-                        onClick={e => e.stopPropagation()}
-                        style={{ flex: 1, border: 'none', outline: 'none', fontFamily: 'var(--font-main)', fontSize: '15px', fontWeight: '600', color: 'var(--color-text)', background: 'transparent' }}
-                      />
+              {noteTotal && (
+                <>
+                  <div
+                    style={{ display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, paddingTop: '12px', paddingBottom: modExpanded ? '4px' : '0', cursor: 'pointer' }}
+                    onClick={() => setModExpanded(v => !v)}
+                  >
+                    {modExpanded && modSteps.some(s => s.type !== 'divide') ? (
+                      editingSubtotalLabel ? (
+                        <input ref={subtotalLabelRef} value={subtotalLabel}
+                          onChange={e => setSubtotalLabel(e.target.value)}
+                          onBlur={() => { saveSubtotalLabel(subtotalLabel); setEditingSubtotalLabel(false) }}
+                          onKeyDown={e => { if (e.key === 'Enter') { saveSubtotalLabel(subtotalLabel); setEditingSubtotalLabel(false) } }}
+                          onClick={e => e.stopPropagation()}
+                          style={{ flex: 1, border: 'none', outline: 'none', fontFamily: 'var(--font-main)', fontSize: '15px', fontWeight: '600', color: 'var(--color-text)', background: 'transparent' }}
+                        />
+                      ) : (
+                        <span onClick={e => { e.stopPropagation(); setEditingSubtotalLabel(true) }} style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: 'var(--color-text)', cursor: 'text' }}>{subtotalLabel}</span>
+                      )
                     ) : (
-                      <span onClick={e => { e.stopPropagation(); setEditingSubtotalLabel(true) }} style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: 'var(--color-text)', cursor: 'text' }}>{subtotalLabel}</span>
-                    )
-                  ) : (
-                    <span style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: 'var(--color-text)' }}>Total</span>
-                  )
-                ) : (
-                  <span style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: 'var(--color-text)' }}>Total</span>
-                )}
+                      <span style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: 'var(--color-text)' }}>Total</span>
+                    )}
+                    <span ref={totalNumberRef} style={{ width: NUM_COL_WIDTH, textAlign: 'right', fontSize: '15px', fontWeight: '600', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text)' }}>
+                      {formatMonetary(modExpanded ? subtotalResult.total : noteTotal.total)}{noteTotal.currency}
+                    </span>
+                    <span style={{ fontSize: '10px', color: 'var(--color-text-light)', opacity: 0.5, transform: modExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', display: 'inline-block', lineHeight: 1, marginLeft: '6px', width: '20px', textAlign: 'center' }}>▾</span>
+                  </div>
 
-                <span ref={totalNumberRef} style={{ width: NUM_COL_WIDTH, textAlign: 'right', fontSize: '15px', fontWeight: '600', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text)' }}>
-                  {formatMonetary(modExpanded ? subtotalResult.total : noteTotal.total)}{noteTotal.currency}
-                </span>
-                <span style={{ fontSize: '10px', color: 'var(--color-text-light)', opacity: 0.5, transform: modExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', display: 'inline-block', lineHeight: 1, marginLeft: '6px', width: '20px', textAlign: 'center' }}>▾</span>
-              </div>
-
-              {modExpanded && (
-                <div style={{ paddingBottom: '8px' }}>
-                  {modSteps.map(step => (
-                    <ModRow key={step.id} step={step}
-                      isDragging={modDragId === step.id} isDragOver={modDragOverId === step.id}
-                      isEditing={editingModId === step.id} editingRaw={editingModRaw}
-                      onEditingRawChange={setEditingModRaw}
-                      onStartEdit={startEditMod} onCommitEdit={commitEditMod} onCancelEdit={() => setEditingModId(null)}
-                      onDelete={deleteModifier}
-                      onDragStart={handleModDragStart} onDragOver={handleModDragOver}
-                      onDrop={handleModDrop} onDragEnd={handleModDragEnd}
-                      currency={noteTotal.currency} numColWidth={NUM_COL_WIDTH}
-                    />
-                  ))}
-                  <ModAddRow modInput={modInput} setModInput={setModInput} addModifier={addModifier} modInputRef={modInputRef} hasItems={modSteps.length > 0} />
-
-                  {modSteps.some(s => s.type !== 'divide') && (
-                    <div style={{ display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, paddingTop: '10px', borderTop: '1px solid var(--color-border)', fontSize: '17px', fontWeight: '700', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text)' }}>
-                      <span style={{ flex: 1 }}>Total</span>
-                      <span style={{ width: NUM_COL_WIDTH, textAlign: 'right' }}>{formatMonetary(noteTotal.total)}{noteTotal.currency}</span>
-                      <span style={{ width: '26px' }} />
+                  {modExpanded && (
+                    <div style={{ paddingBottom: '8px' }}>
+                      {modSteps.map(step => (
+                        <ModRow key={step.id} step={step}
+                          isDragging={modDragId === step.id} isDragOver={modDragOverId === step.id}
+                          isEditing={editingModId === step.id} editingRaw={editingModRaw}
+                          onEditingRawChange={setEditingModRaw}
+                          onStartEdit={startEditMod} onCommitEdit={commitEditMod} onCancelEdit={() => setEditingModId(null)}
+                          onDelete={deleteModifier}
+                          onDragStart={handleModDragStart} onDragOver={handleModDragOver}
+                          onDrop={handleModDrop} onDragEnd={handleModDragEnd}
+                          currency={noteTotal.currency} numColWidth={NUM_COL_WIDTH}
+                        />
+                      ))}
+                      <ModAddRow modInput={modInput} setModInput={setModInput} addModifier={addModifier} modInputRef={modInputRef} hasItems={modSteps.length > 0} />
+                      {modSteps.some(s => s.type !== 'divide') && (
+                        <div style={{ display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, paddingTop: '10px', borderTop: '1px solid var(--color-border)', fontSize: '17px', fontWeight: '700', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text)' }}>
+                          <span style={{ flex: 1 }}>Total</span>
+                          <span style={{ width: NUM_COL_WIDTH, textAlign: 'right' }}>{formatMonetary(noteTotal.total)}{noteTotal.currency}</span>
+                          <span style={{ width: '26px' }} />
+                        </div>
+                      )}
                     </div>
                   )}
+                </>
+              )}
+
+              {/* desglose por etiquetas */}
+              {tagTotals.length > 0 && (
+                <div style={{ marginTop: '16px', borderTop: '1px solid var(--color-border)', paddingTop: '12px' }}>
+                  {tagTotals.map(tt => (
+                    <div key={tt.tag} style={{ display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, paddingBottom: '6px' }}>
+                      <span style={{ flex: 1, fontSize: '14px', color: 'var(--color-text-light)' }}>{displayTag(tt.tag)}</span>
+                      <span style={{ width: NUM_COL_WIDTH, textAlign: 'right', fontSize: '14px', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text)' }}>
+                        {formatMonetary(tt.total)}{tt.currency}
+                      </span>
+                      <span style={{ width: '26px' }} />
+                    </div>
+                  ))}
                 </div>
               )}
-            </>
-          )}
-
-          {/* ── desglose por etiquetas ── */}
-          {tagTotals.length > 0 && (
-            <div style={{ marginTop: '16px', borderTop: '1px solid var(--color-border)', paddingTop: '12px' }}>
-              {tagTotals.map(tt => (
-                <div key={tt.tag} style={{ display: 'flex', alignItems: 'center', paddingLeft: ROW_PL, paddingBottom: '6px' }}>
-                  <span style={{ flex: 1, fontSize: '14px', color: 'var(--color-text-light)' }}>{tt.tag}</span>
-                  <span style={{ width: NUM_COL_WIDTH, textAlign: 'right', fontSize: '14px', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text)' }}>
-                    {formatMonetary(tt.total)}{tt.currency}
-                  </span>
-                  <span style={{ width: '26px' }} />
-                </div>
-              ))}
             </div>
           )}
-        </div>
-      )}
 
-      {/* campo de texto libre */}
-      <textarea ref={footerRef} value={footerNote}
-        onChange={e => saveFooterNote(e.target.value)}
-        onClick={e => e.stopPropagation()}
-        onFocus={e => { e.preventDefault(); e.target.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }}
-        placeholder="" rows={2}
-        style={{ width: '100%', border: 'none', outline: 'none', fontFamily: 'var(--font-main)', fontSize: '14px', color: 'var(--color-text)', resize: 'none', lineHeight: '1.6', background: 'transparent', marginTop: '32px', boxSizing: 'border-box', overflow: 'hidden', display: 'block' }}
-      />
+          <textarea value={footerNote}
+            onChange={e => saveFooterNote(e.target.value)}
+            onClick={e => e.stopPropagation()}
+            placeholder="" rows={2}
+            style={{ width: '100%', border: 'none', outline: 'none', fontFamily: 'var(--font-main)', fontSize: '14px', color: 'var(--color-text)', resize: 'none', lineHeight: '1.6', background: 'transparent', marginTop: '32px', boxSizing: 'border-box', overflow: 'hidden', display: 'block' }}
+          />
+        </>
+      )}
     </div>
   )
 }
