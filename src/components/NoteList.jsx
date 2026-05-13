@@ -59,7 +59,7 @@ function NoteList({ notes, onSelectNote, onCreateNote, onDeleteNote, onDuplicate
         marginBottom: '24px'
       }}>
         <span style={{ fontSize: '20px', fontWeight: 'bold', letterSpacing: '0.5px' }}>
-          <span>PEPPER</span><span style={{ fontWeight: '400' }}>PAD</span>
+          <span>TRAMME</span>
         </span>
         <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px', color: 'var(--color-text-light)' }}>
           ☰

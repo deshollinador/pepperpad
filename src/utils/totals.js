@@ -1,4 +1,5 @@
 // src/utils/totals.js
+// Solo lógica de cálculo. El parsing vive en blockParser.js
 
 export const MONETARY = ['€', '$', '£']
 export const isMonetary = (label) => MONETARY.includes(label)
@@ -14,29 +15,13 @@ export const formatMonetary = (value) => {
 
 export const normalizeDecimal = (str) => String(str).replace(',', '.')
 
-export const formatUnitValue = (raw) => {
-  const original = String(raw).trim()
-  const normalized = original.replace(',', '.')
-  const num = parseFloat(normalized)
-  if (isNaN(num)) return original
-  return original.replace('.', ',')
+export const formatUnitTotal = (total, hasDecimals) => {
+  if (!hasDecimals && Number.isInteger(total)) return String(total)
+  return String(total).replace('.', ',')
 }
 
-export const normalizeTag = (raw) => raw.trim().toLowerCase()
-export const displayTag = (tag) => tag.charAt(0).toUpperCase() + tag.slice(1)
-
-// ─── parsear etiquetas # ─────────────────────────────────────
-// Acepta #Tag con o sin espacio previo: "Verde#Carrefour" o "Verde #Carrefour"
-export const parseBlockTags = (raw) => {
-  const tags = []
-  const tagRegex = /#([a-zA-ZÀ-ÿ0-9_]+)/g
-  let match
-  while ((match = tagRegex.exec(raw)) !== null) {
-    tags.push(normalizeTag(match[1]))
-  }
-  const cleanTitle = raw.replace(/#[a-zA-ZÀ-ÿ0-9_]+/g, '').trim()
-  return { cleanTitle, tags }
-}
+// Re-exportar desde blockParser para compatibilidad
+export { displayTag } from './blockParser'
 
 // ─── detectar modo estructurado ──────────────────────────────
 export const isStructuredNote = (blocks) => {
@@ -79,23 +64,12 @@ export const computeUnitTotals = (blocks) => {
       if (!map[attr.label]) map[attr.label] = { total: 0, count: 0, hasDecimals: false }
       map[attr.label].total += val
       map[attr.label].count += 1
-      if (String(attr.value).includes(',') || String(attr.value).includes('.')) {
-        map[attr.label].hasDecimals = true
-      }
+      if (String(attr.value).includes(',') || String(attr.value).includes('.')) map[attr.label].hasDecimals = true
     }
   }
   return Object.entries(map)
     .filter(([, v]) => v.count >= 2)
-    .map(([label, v]) => ({
-      label,
-      total: Math.round(v.total * 100) / 100,
-      hasDecimals: v.hasDecimals
-    }))
-}
-
-export const formatUnitTotal = (total, hasDecimals) => {
-  if (!hasDecimals && Number.isInteger(total)) return String(total)
-  return String(total).replace('.', ',')
+    .map(([label, v]) => ({ label, total: Math.round(v.total * 100) / 100, hasDecimals: v.hasDecimals }))
 }
 
 // ─── valor monetario efectivo de un bloque ───────────────────
@@ -123,22 +97,51 @@ const getBlockMonetaryValue = (block) => {
   return { value, currency: monetaryAttr.label }
 }
 
+// ─── valor de unidades no monetarias de un bloque ────────────
+const getBlockUnitValues = (block) => {
+  const children = block.children || []
+  if (children.length > 0) {
+    const map = {}
+    for (const child of children) {
+      const attrs = (child.attributes || []).map(a => ({ ...a, label: (a.label || '').toLowerCase() }))
+      for (const attr of attrs) {
+        if (isMonetary(attr.label) || isUds(attr.label)) continue
+        const val = parseFloat(normalizeDecimal(attr.value))
+        if (isNaN(val)) continue
+        if (!map[attr.label]) map[attr.label] = 0
+        map[attr.label] += val
+      }
+    }
+    return Object.entries(map).map(([label, total]) => ({ label, total: Math.round(total * 100) / 100 }))
+  }
+  const attrs = (block.attributes || []).map(a => ({ ...a, label: (a.label || '').toLowerCase() }))
+  return attrs
+    .filter(a => !isMonetary(a.label) && !isUds(a.label))
+    .map(a => ({ label: a.label, total: parseFloat(normalizeDecimal(a.value)) || 0 }))
+}
+
 // ─── totales por etiqueta # ───────────────────────────────────
 export const computeTagTotals = (blocks) => {
   const map = {}
   for (const block of blocks) {
     const tags = block.tags || []
     if (tags.length === 0) continue
-    const monetary = getBlockMonetaryValue(block)
-    if (!monetary) continue
     const tag = tags[0]
-    if (!map[tag]) map[tag] = { total: 0, currency: monetary.currency }
-    map[tag].total += monetary.value
+    if (!map[tag]) map[tag] = { monetary: null, units: {} }
+    const monetary = getBlockMonetaryValue(block)
+    if (monetary) {
+      if (!map[tag].monetary) map[tag].monetary = { total: 0, currency: monetary.currency }
+      map[tag].monetary.total += monetary.value
+    }
+    for (const { label, total } of getBlockUnitValues(block)) {
+      if (!map[tag].units[label]) map[tag].units[label] = 0
+      map[tag].units[label] += total
+    }
   }
   return Object.entries(map).map(([tag, v]) => ({
     tag,
-    total: Math.round(v.total * 100) / 100,
-    currency: v.currency
+    monetary: v.monetary ? { total: Math.round(v.monetary.total * 100) / 100, currency: v.monetary.currency } : null,
+    units: Object.entries(v.units).map(([label, total]) => ({ label, total: Math.round(total * 100) / 100 }))
   }))
 }
 
@@ -151,13 +154,11 @@ export const computeChildrenUnitTotals = (children) => {
       if (isMonetary(attr.label) || isUds(attr.label)) continue
       const val = parseFloat(normalizeDecimal(attr.value))
       if (isNaN(val)) continue
-      if (!map[attr.label]) map[attr.label] = { total: 0, count: 0 }
+      if (!map[attr.label]) map[attr.label] = { total: 0 }
       map[attr.label].total += val
-      map[attr.label].count += 1
     }
   }
-  return Object.entries(map)
-    .map(([label, v]) => ({ label, total: Math.round(v.total * 100) / 100 }))
+  return Object.entries(map).map(([label, v]) => ({ label, total: Math.round(v.total * 100) / 100 }))
 }
 
 export const computeChildrenSubtotal = (children) => computeSubtotal(children)

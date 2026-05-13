@@ -5,13 +5,13 @@ import NoteDetail from './components/NoteDetail'
 
 function App() {
   const [notes, setNotes] = useState(() => {
-    const saved = localStorage.getItem('pepperpad-notes')
+    const saved = localStorage.getItem('tramme-notes')
     return saved ? JSON.parse(saved) : []
   })
   const [selectedNote, setSelectedNote] = useState(null)
 
   useEffect(() => {
-    localStorage.setItem('pepperpad-notes', JSON.stringify(notes))
+    localStorage.setItem('tramme-notes', JSON.stringify(notes))
   }, [notes])
 
   const createNote = () => {
